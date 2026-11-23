@@ -1,0 +1,354 @@
+<style>
+  /* Componentes compartidos por las vistas (modales de pago y aviso). */
+  .campo select {
+    width: 100%;
+    padding: 12px 14px;
+    border-radius: var(--radio-chico);
+    border: 1.5px solid var(--color-borde);
+    background: var(--color-blanco);
+    color: var(--color-texto);
+    font: inherit;
+  }
+  .campo select:focus { outline: none; border-color: var(--color-secundario); }
+
+  button.chip { cursor: pointer; font: inherit; display: inline-flex; align-items: center; gap: 7px; }
+  button.chip svg { width: 15px; height: 15px; }
+
+  .aviso-wa {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 11px 13px;
+    border-radius: 12px;
+    background: #E7F8EF;
+    border: 1px solid #BFE8D2;
+    color: #1E5E3A;
+    font-size: 12.5px;
+    line-height: 1.5;
+    margin-bottom: 14px;
+  }
+  .aviso-wa svg { width: 18px; height: 18px; flex: 0 0 18px; margin-top: 1px; }
+
+  .pago-qr-caja {
+    text-align: center;
+    border: 1px dashed #D8C69E;
+    background: #FDF8EE;
+    border-radius: 14px;
+    padding: 12px;
+    margin-bottom: 14px;
+  }
+  .pago-qr-caja img {
+    width: 150px;
+    height: 150px;
+    border-radius: 10px;
+    background: #fff;
+    padding: 6px;
+    box-shadow: 0 2px 10px rgba(90, 60, 10, .12);
+  }
+  .pago-qr-caja p { margin: 7px 0 0; font-size: 11.5px; color: #7A5A1D; line-height: 1.45; }
+
+  .pago-resumen {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 9px 12px;
+    border-radius: 10px;
+    background: var(--fondo-tenue);
+    font-size: 12.5px;
+    margin-bottom: 14px;
+  }
+  .pago-resumen strong { font-variant-numeric: tabular-nums; }
+</style>
+
+<script>
+  /* ==========================================================================
+     COMPONENTES — portapapeles, pago, aviso por WhatsApp y pedido de texto.
+     Se apoyan en App (AppCore) y en las funciones del backend.
+     ========================================================================== */
+  (function () {
+    'use strict';
+
+    function textoPlano(valor) { return String(valor == null ? '' : valor); }
+
+    App.copiar = function (texto) {
+      var t = textoPlano(texto);
+      return new Promise(function (resolve) {
+        function legado() {
+          try {
+            var area = document.createElement('textarea');
+            area.value = t;
+            area.setAttribute('readonly', 'readonly');
+            area.style.position = 'fixed';
+            area.style.top = '-1000px';
+            document.body.appendChild(area);
+            area.select();
+            var ok = document.execCommand('copy');
+            document.body.removeChild(area);
+            resolve(!!ok);
+          } catch (err) {
+            resolve(false);
+          }
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(t).then(function () { resolve(true); }, legado);
+        } else {
+          legado();
+        }
+      });
+    };
+
+    /**
+     * Abre un modal pidiendo un texto corto. Devuelve una promesa con el texto
+     * o null si se canceló.
+     */
+    App.pedirTexto = function (opciones) {
+      var o = opciones || {};
+      return new Promise(function (resolve) {
+        var resuelto = false;
+        function fin(valor) {
+          if (resuelto) return;
+          resuelto = true;
+          resolve(valor);
+        }
+
+        App.modal({
+          titulo: o.titulo || 'Escribí un motivo',
+          sub: o.sub || '',
+          ancho: 'angosto',
+          onCerrar: function () { fin(null); },
+          cuerpo:
+            '<div class="campo" style="margin-bottom:0">' +
+              '<label for="textoModal">' + App.esc(o.label || 'Motivo') + '</label>' +
+              '<textarea id="textoModal" rows="3" maxlength="200" placeholder="' +
+                App.esc(o.placeholder || '') + '"></textarea>' +
+              (o.ayuda ? '<p class="ayuda" style="margin:6px 0 0">' + App.esc(o.ayuda) + '</p>' : '') +
+            '</div>',
+          acciones: [
+            { label: 'Cancelar', clase: 'btn-texto', onClick: function () { fin(null); } },
+            {
+              label: o.confirmar || 'Aceptar',
+              clase: o.peligro ? 'btn-peligro' : 'btn-primario',
+              onClick: function (el) {
+                var valor = (App.$('#textoModal', el).value || '').trim();
+                if (o.requerido && valor.length < (o.minimo || 3)) {
+                  App.toast(o.error || 'Escribí un motivo de al menos 3 letras.', 'error');
+                  return false;
+                }
+                fin(valor);
+              }
+            }
+          ]
+        });
+
+        window.setTimeout(function () {
+          var area = App.$('#textoModal');
+          if (area) area.focus();
+        }, 60);
+      });
+    };
+
+    /**
+     * Modal para cobrar (total o parcial). Recibe el detalle de la orden y un
+     * callback con la orden actualizada.
+     */
+    App.modalPago = function (orden, alTerminar) {
+      if (!orden) return;
+      var saldo = Number(orden.saldo) || 0;
+      if (saldo <= 0.005) {
+        App.toast('Esta orden ya está paga.', 'info');
+        return;
+      }
+
+      var negocio = (App.ctx && App.ctx.negocio) || {};
+      var metodo = 'efectivo';
+      var montoInicial = saldo.toFixed(2).replace('.', ',');
+
+      var qrHtml = negocio.pagoQrUrl
+        ? '<div id="pagoQrCaja" class="pago-qr-caja oculto">' +
+            '<img src="' + App.esc(negocio.pagoQrUrl) + '" alt="QR de pago del negocio">' +
+            '<p>' + App.esc(negocio.pagoInstrucciones || 'Escaneá el QR y registrá el pago cuando lo confirmes.') + '</p>' +
+          '</div>'
+        : '';
+
+      var modal = App.modal({
+        titulo: 'Registrar pago',
+        sub: orden.codigo + ' · ' + (orden.cliente && orden.cliente.nombre ? orden.cliente.nombre : ''),
+        ancho: 'angosto',
+        cuerpo:
+          '<div class="pago-resumen">' +
+            '<span>Total <strong>' + App.bs(orden.total) + '</strong></span>' +
+            '<span>Saldo <strong>' + App.bs(saldo) + '</strong></span>' +
+          '</div>' +
+          '<div class="campo">' +
+            '<label for="pagoMonto">Monto a registrar</label>' +
+            '<input id="pagoMonto" type="text" inputmode="decimal" autocomplete="off" value="' + montoInicial + '">' +
+            '<p class="ayuda" style="margin:6px 0 0">Podés cobrar una parte; el saldo se actualiza solo.</p>' +
+          '</div>' +
+          '<div class="campo">' +
+            '<label>Método</label>' +
+            '<div class="chips" id="pagoMetodos">' +
+              '<button type="button" class="chip seleccionada" data-metodo="efectivo">' +
+                App.icono('efectivo') + ' Efectivo</button>' +
+              '<button type="button" class="chip" data-metodo="qr">' +
+                App.icono('qr') + ' QR</button>' +
+            '</div>' +
+          '</div>' +
+          qrHtml +
+          '<div class="campo" style="margin-bottom:0">' +
+            '<label for="pagoNota">Nota (opcional)</label>' +
+            '<input id="pagoNota" type="text" maxlength="160" placeholder="Ej. adelanto, comprobante 123">' +
+          '</div>',
+        acciones: [
+          { label: 'Cancelar', clase: 'btn-texto' },
+          {
+            label: 'Registrar pago',
+            clase: 'btn-primario',
+            onClick: function (el) {
+              var monto = Number(String(App.$('#pagoMonto', el).value || '').replace(',', '.'));
+              if (!isFinite(monto) || monto <= 0) {
+                App.toast('Ingresá un monto mayor a 0.', 'error');
+                return false;
+              }
+              if (monto > saldo + 0.005) {
+                App.toast('El monto supera el saldo pendiente (' + App.bs(saldo) + ').', 'error');
+                return false;
+              }
+
+              var nota = (App.$('#pagoNota', el).value || '').trim();
+              App.api('registrarPago', App.sesion.token, orden.id, {
+                metodo: metodo,
+                monto: monto,
+                nota: nota
+              }).then(function (res) {
+                if (!res.ok) {
+                  App.toast(res.error || 'No pudimos registrar el pago.', 'error');
+                  return;
+                }
+                App.cerrarModal();
+                App.toast('Pago de ' + App.bs(monto) + ' registrado.', 'exito');
+                if (typeof alTerminar === 'function') alTerminar(res.orden);
+              });
+              return false; // esperamos la respuesta antes de cerrar
+            }
+          }
+        ]
+      });
+
+      var metodos = App.$$('[data-metodo]', modal.el);
+      var qrCaja = App.$('#pagoQrCaja', modal.el);
+      metodos.forEach(function (boton) {
+        boton.addEventListener('click', function () {
+          metodo = boton.getAttribute('data-metodo') === 'qr' ? 'qr' : 'efectivo';
+          metodos.forEach(function (b) { b.classList.toggle('seleccionada', b === boton); });
+          if (qrCaja) qrCaja.classList.toggle('oculto', metodo !== 'qr');
+        });
+      });
+
+      var inputMonto = App.$('#pagoMonto', modal.el);
+      if (inputMonto) {
+        window.setTimeout(function () { inputMonto.select(); }, 80);
+      }
+    };
+
+    /**
+     * Prepara el mensaje de WhatsApp, permite editarlo y registra el aviso.
+     */
+    App.modalNotificacion = function (ordenId, alTerminar) {
+      App.cargando(1, 'Preparando mensaje…');
+      App.api('getNotificacion', App.sesion.token, ordenId).then(function (res) {
+        App.cargando(-1);
+        if (!res.ok) {
+          App.toast(res.error || 'No pudimos preparar el mensaje.', 'error');
+          return;
+        }
+
+        var canal = 'whatsapp';
+        var yaAvisado = res.yaNotificado
+          ? '<div class="chip-info chip-info--alerta" style="margin-bottom:12px">' +
+              App.icono('check') + ' Ya avisaste a este cliente el ' +
+              App.esc(App.fechaHoraMs(res.fechaNotificacionMs)) + '</div>'
+          : '';
+
+        var modal = App.modal({
+          titulo: 'Avisar que está listo',
+          sub: res.telefonoBonito || res.telefono,
+          cuerpo:
+            yaAvisado +
+            '<div class="aviso-wa">' +
+              App.icono('whatsapp') +
+              '<div>Se va a abrir <strong>WhatsApp</strong> con el mensaje ya escrito. ' +
+              'No se envía solo: tenés que tocar enviar en tu teléfono.</div>' +
+            '</div>' +
+            '<div class="campo" style="margin-bottom:0">' +
+              '<label for="waTexto">Mensaje</label>' +
+              '<textarea id="waTexto" rows="9">' + App.esc(res.texto) + '</textarea>' +
+              (res.linkEstado
+                ? '<p class="ayuda" style="margin:6px 0 0">El link de estado ya viene incluido. Podés editarlo antes de enviar.</p>'
+                : '') +
+            '</div>',
+          acciones: [
+            {
+              label: 'Copiar mensaje',
+              clase: 'btn-secundario',
+              cerrar: false,
+              onClick: function (el) {
+                canal = 'copiar';
+                App.copiar(App.$('#waTexto', el).value).then(function (ok) {
+                  App.toast(ok ? 'Mensaje copiado.' : 'No pudimos copiar. Seleccioná el texto y copialo a mano.',
+                    ok ? 'exito' : 'error');
+                });
+              }
+            },
+            {
+              label: 'Abrir WhatsApp',
+              clase: 'btn-whatsapp',
+              cerrar: false,
+              onClick: function (el) {
+                canal = 'whatsapp';
+                var texto = App.$('#waTexto', el).value || res.texto;
+                var url = App.waLink(res.telefono, texto);
+                var ventana = window.open(url, '_blank');
+                if (!ventana) {
+                  App.toast('El navegador bloqueó la ventana. Permití las ventanas emergentes.', 'error');
+                }
+              }
+            },
+            {
+              label: 'Ya lo envié',
+              clase: 'btn-primario',
+              onClick: function () {
+                App.api('marcarNotificado', App.sesion.token, ordenId, { canal: canal }).then(function (r) {
+                  if (!r.ok) {
+                    App.toast(r.error || 'No pudimos registrar el aviso.', 'error');
+                    return;
+                  }
+                  App.cerrarModal();
+                  App.toast('Aviso registrado.', 'exito');
+                  if (typeof alTerminar === 'function') alTerminar(r.orden);
+                });
+                return false;
+              }
+            }
+          ]
+        });
+
+        var area = App.$('#waTexto', modal.el);
+        if (area) window.setTimeout(function () { area.focus(); area.setSelectionRange(0, 0); }, 80);
+      });
+    };
+
+    /** Imprime el recibo de una orden trayendo el detalle completo. */
+    App.imprimirPorId = function (id) {
+      App.cargando(1, 'Preparando recibo…');
+      return App.api('getOrden', App.sesion.token, id).then(function (res) {
+        App.cargando(-1);
+        if (!res.ok) {
+          App.toast(res.error || 'No pudimos cargar la orden.', 'error');
+          return false;
+        }
+        App.imprimirRecibo(res.orden);
+        return true;
+      });
+    };
+  })();
+</script>

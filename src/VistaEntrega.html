@@ -1,0 +1,289 @@
+<style>
+  .entrega-bloque + .entrega-bloque { margin-top: 18px; }
+  .entrega-cabecera {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .entrega-cabecera .seccion-titulo { margin: 0; }
+  .entrega-conteo {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 26px;
+    height: 26px;
+    padding: 0 8px;
+    border-radius: 999px;
+    background: var(--fondo-tenue);
+    color: var(--color-primario);
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .fila-orden__nombre { vertical-align: middle; }
+  .fila-orden__hora { font-variant-numeric: tabular-nums; }
+</style>
+
+<script>
+  /* ==========================================================================
+     VISTA ENTREGA — pedidos listos, cobro y entrega con recibo.
+     ========================================================================== */
+  (function () {
+    'use strict';
+
+    var V = window.Vistas = window.Vistas || {};
+
+    function montar(cont) {
+      var s = {
+        listas: [],
+        entregadas: [],
+        filtro: '',
+        cargando: false
+      };
+
+      cont.innerHTML =
+        '<div class="vista__cabecera">' +
+          '<div>' +
+            '<h1 class="vista__titulo">Entrega</h1>' +
+            '<p class="vista__bajada">Cobrá el saldo, avisá por WhatsApp y entregá el pedido.</p>' +
+          '</div>' +
+          '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
+            '<span class="chip-info">Hoy · ' + App.esc(App.fechaISO(App.ctx.hoy)) + '</span>' +
+            '<button type="button" class="btn btn-secundario btn-chico" id="eRefrescar">' +
+              App.icono('refrescar') + ' Actualizar</button>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="tablero-herramientas">' +
+          '<div class="buscador">' +
+            App.icono('buscar') +
+            '<input id="eBuscar" type="search" autocomplete="off" placeholder="Buscar por código, nombre o celular">' +
+          '</div>' +
+        '</div>' +
+
+        '<section class="tarjeta entrega-bloque">' +
+          '<div class="entrega-cabecera">' +
+            '<h2 class="seccion-titulo">Listas para retirar <span class="entrega-conteo" id="eConteoListas">0</span></h2>' +
+            '<span class="ayuda">Cobrá antes de entregar si hay saldo.</span>' +
+          '</div>' +
+          '<div class="lista-entrega" id="eListas">' +
+            '<div class="cargando-bloque"><span class="spinner"></span>Cargando pedidos…</div>' +
+          '</div>' +
+        '</section>' +
+
+        '<section class="tarjeta entrega-bloque">' +
+          '<div class="entrega-cabecera">' +
+            '<h2 class="seccion-titulo">Entregadas hoy <span class="entrega-conteo" id="eConteoEntregadas">0</span></h2>' +
+            '<span class="ayuda">Para reimprimir un recibo.</span>' +
+          '</div>' +
+          '<div class="lista-entrega" id="eEntregadas"></div>' +
+        '</section>';
+
+      var el = {
+        buscar: App.$('#eBuscar', cont),
+        listas: App.$('#eListas', cont),
+        entregadas: App.$('#eEntregadas', cont),
+        conteoListas: App.$('#eConteoListas', cont),
+        conteoEntregadas: App.$('#eConteoEntregadas', cont),
+        refrescar: App.$('#eRefrescar', cont)
+      };
+
+      function coincide(o) {
+        var q = s.filtro.trim().toLowerCase();
+        if (!q) return true;
+        var nombre = String(o.clienteNombre || '').toLowerCase();
+        var codigo = String(o.codigo || '').toLowerCase();
+        var tel = String(o.clienteTelefono || '').replace(/\D/g, '');
+        var qTel = q.replace(/\D/g, '');
+        return nombre.indexOf(q) > -1 || codigo.indexOf(q) > -1 || (qTel && tel.indexOf(qTel) > -1);
+      }
+
+      function filaLista(o) {
+        var saldo = Number(o.saldo) || 0;
+        var sinPago = saldo > 0.005;
+
+        return '<article class="fila-orden" data-id="' + o.id + '">' +
+          '<div class="fila-orden__principal">' +
+            '<div>' +
+              '<span class="fila-orden__codigo">' + App.esc(o.codigo) + '</span>' +
+              '<span class="fila-orden__nombre">' + App.esc(o.clienteNombre) + '</span>' +
+            '</div>' +
+            '<div class="fila-orden__meta">' +
+              '<span>' + (o.prendas ? o.prendas + ' prendas · ' : '') + App.kg(o.pesoKg) + '</span>' +
+              '<span>Entrega ' + App.esc(App.fechaISO(o.fechaPrometida)) + '</span>' +
+              '<span>' + (o.clienteTelefono ? App.esc(String(o.clienteTelefono).replace(/(\d{3})(\d{3})(\d{2})/, '$1 $2 $3')) : '') + '</span>' +
+              App.pagoBadge(o.pagoEstado) +
+              (o.notificado
+                ? '<span class="chip-info">' + App.icono('check') + ' Avisado</span>'
+                : '<span class="chip-info chip-info--alerta">Sin avisar</span>') +
+            '</div>' +
+          '</div>' +
+          '<div class="fila-orden__acciones">' +
+            '<span style="text-align:right;margin-right:2px">' +
+              '<span style="display:block;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--tinta-suave);font-weight:700">' +
+                (sinPago ? 'Saldo' : 'Total') + '</span>' +
+              '<strong style="font-family:Fraunces,Georgia,serif;font-size:17px;color:' +
+                (sinPago ? 'var(--color-alerta)' : 'var(--color-primario)') + '">' +
+                App.bs(sinPago ? saldo : o.total) + '</strong>' +
+            '</span>' +
+            (sinPago
+              ? '<button type="button" class="btn btn-secundario btn-xs" data-accion="cobrar">Cobrar</button>'
+              : '') +
+            '<button type="button" class="btn btn-whatsapp btn-xs" data-accion="avisar">' +
+              App.icono('whatsapp') + ' Avisar</button>' +
+            '<button type="button" class="btn btn-primario btn-xs" data-accion="entregar">Entregar</button>' +
+            '<button type="button" class="btn btn-secundario btn-xs" data-accion="imprimir" aria-label="Imprimir recibo" title="Imprimir recibo">' +
+              App.icono('imprimir') + '</button>' +
+          '</div>' +
+        '</article>';
+      }
+
+      function filaEntregada(o) {
+        return '<article class="fila-orden" data-id="' + o.id + '">' +
+          '<div class="fila-orden__principal">' +
+            '<div>' +
+              '<span class="fila-orden__codigo">' + App.esc(o.codigo) + '</span>' +
+              '<span class="fila-orden__nombre">' + App.esc(o.clienteNombre) + '</span>' +
+            '</div>' +
+            '<div class="fila-orden__meta">' +
+              '<span class="fila-orden__hora">' + App.esc(App.horaMs(o.entregaMs)) + '</span>' +
+              '<span>' + (o.prendas ? o.prendas + ' prendas · ' : '') + App.kg(o.pesoKg) + '</span>' +
+              App.pagoBadge(o.pagoEstado) +
+            '</div>' +
+          '</div>' +
+          '<div class="fila-orden__acciones">' +
+            '<strong style="font-family:Fraunces,Georgia,serif;font-size:17px;color:var(--color-primario);margin-right:4px">' +
+              App.bs(o.total) + '</strong>' +
+            '<button type="button" class="btn btn-secundario btn-xs" data-accion="imprimir">' +
+              App.icono('imprimir') + ' Recibo</button>' +
+          '</div>' +
+        '</article>';
+      }
+
+      function pintar() {
+        var listas = s.listas.filter(coincide);
+        var entregadas = s.entregadas.filter(coincide);
+
+        el.conteoListas.textContent = String(listas.length);
+        el.conteoEntregadas.textContent = String(entregadas.length);
+
+        el.listas.innerHTML = listas.length
+          ? listas.map(filaLista).join('')
+          : '<div class="vacio-bloque"><strong>No hay pedidos listos para retirar.</strong>' +
+            'Cuando el tablero marque un pedido como <em>Lista</em>, va a aparecer acá.</div>';
+
+        el.entregadas.innerHTML = entregadas.length
+          ? entregadas.map(filaEntregada).join('')
+          : '<div class="vacio-bloque"><strong>Todavía no entregaste pedidos hoy.</strong>' +
+            'Los pedidos entregados quedan acá para reimprimir el recibo.</div>';
+      }
+
+      function cargar() {
+        if (s.cargando) return;
+        s.cargando = true;
+        el.refrescar.disabled = true;
+        App.cargando(1, 'Cargando entregas…');
+
+        App.api('getPanel', App.sesion.token).then(function (res) {
+          s.cargando = false;
+          el.refrescar.disabled = false;
+          App.cargando(-1);
+
+          if (!res || !res.ok) {
+            var msg = (res && res.error) || 'No pudimos cargar las entregas.';
+            if (/Sesi[oó]n vencida/i.test(msg)) { App.salir(true); return; }
+            App.toast(msg, 'error');
+            return;
+          }
+
+          var ordenes = res.ordenes || [];
+          s.listas = ordenes.filter(function (o) { return o.estado === 'lista'; });
+          s.entregadas = ordenes.filter(function (o) { return o.estado === 'entregada'; });
+          pintar();
+        });
+      }
+
+      function confirmarEntrega(o) {
+        App.confirmar({
+          titulo: 'Entregar pedido',
+          sub: o.codigo + ' · ' + o.clienteNombre,
+          mensaje: '¿Confirmás que el cliente retiró el pedido ' + o.codigo + '? ' +
+            'Queda registrada la fecha y hora de entrega.',
+          confirmar: 'Sí, entregar'
+        }).then(function (ok) {
+          if (!ok) return;
+          App.api('avanzarEstado', App.sesion.token, o.id, 'entregada', 'Retirado en mostrador').then(function (res) {
+            if (!res.ok) {
+              App.toast(res.error || 'No pudimos entregar el pedido.', 'error');
+              return;
+            }
+            App.toast('Pedido ' + o.codigo + ' entregado.', 'exito');
+            cargar();
+          });
+        });
+      }
+
+      function cobrar(o, despues) {
+        App.modalPago(o, function (actualizada) {
+          cargar();
+          if (typeof despues === 'function') despues(actualizada);
+        });
+      }
+
+      function entregar(o) {
+        if (Number(o.saldo) > 0.005) {
+          cobrar(o, function (actualizada) {
+            if (Number(actualizada.saldo) <= 0.005) confirmarEntrega(actualizada);
+          });
+          return;
+        }
+        confirmarEntrega(o);
+      }
+
+      // ------------------------------ Eventos -------------------------------
+      el.buscar.addEventListener('input', function () {
+        s.filtro = el.buscar.value;
+        pintar();
+      });
+
+      el.refrescar.addEventListener('click', cargar);
+
+      el.listas.addEventListener('click', function (ev) {
+        var boton = ev.target.closest('[data-accion]');
+        if (!boton) return;
+        var fila = boton.closest('[data-id]');
+        if (!fila) return;
+        var id = Number(fila.getAttribute('data-id'));
+        var orden = s.listas.filter(function (o) { return o.id === id; })[0];
+        if (!orden) return;
+
+        var accion = boton.getAttribute('data-accion');
+        if (accion === 'cobrar') {
+          cobrar(orden);
+        } else if (accion === 'avisar') {
+          App.modalNotificacion(orden.id, function () { cargar(); });
+        } else if (accion === 'entregar') {
+          entregar(orden);
+        } else if (accion === 'imprimir') {
+          App.imprimirPorId(orden.id);
+        }
+      });
+
+      el.entregadas.addEventListener('click', function (ev) {
+        var boton = ev.target.closest('[data-accion="imprimir"]');
+        if (!boton) return;
+        var fila = boton.closest('[data-id]');
+        if (!fila) return;
+        App.imprimirPorId(Number(fila.getAttribute('data-id')));
+      });
+
+      cargar();
+
+      return function limpiar() { /* sin listeners globales */ };
+    }
+
+    V.entrega = { montar: montar };
+  })();
+</script>

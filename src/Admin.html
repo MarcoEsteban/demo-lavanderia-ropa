@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <title>Panel · <?= cfg.negocio_nombre ?></title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧺</text></svg>">
+  <?!= include('EstiloBase') ?>
+  <style>
+    :root {
+      --color-primario: <?= tema.primario ?>;
+      --color-secundario: <?= tema.secundario ?>;
+      --color-acento: <?= tema.acento ?>;
+    }
+  </style>
+  <?!= include('EstiloApp') ?>
+</head>
+<body class="app">
+
+  <!-- ===================== PANTALLA DE ACCESO ===================== -->
+  <section id="pantalla-login" class="login" aria-label="Acceso al panel">
+    <div class="login__arte">
+      <div class="login__marca">
+        <span class="marca__icono" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 8.5 12 4l8 4.5v9L12 22l-8-4.5v-9Z"/>
+            <path d="m4 8.5 8 4.5 8-4.5M12 13v9"/>
+          </svg>
+        </span>
+        <?= cfg.negocio_nombre ?>
+      </div>
+
+      <div>
+        <p class="login__frase">Ropa limpia,<br>seguimiento <em>simple</em>.</p>
+        <p class="login__nota">Recepción por kilo, tablero de producción, entrega con pago y aviso por WhatsApp en un solo lugar.</p>
+      </div>
+
+      <div class="login__puntos">
+        <span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m5 13 4 4L19 7"/></svg>
+          Sin apps extra
+        </span>
+        <span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m5 13 4 4L19 7"/></svg>
+          Precios congelados
+        </span>
+        <span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m5 13 4 4L19 7"/></svg>
+          Estado público por QR
+        </span>
+      </div>
+    </div>
+
+    <div class="login__panel">
+      <div class="login__caja">
+        <h1 class="login__titulo">¿Quién entra?</h1>
+        <p class="login__bajada">Elegí tu puesto e ingresá el PIN del local.</p>
+
+        <div class="roles" role="tablist" aria-label="Puesto de trabajo">
+          <button type="button" class="rol seleccionado" data-rol="staff" role="tab" aria-selected="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16v13H4zM8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M4 12h16"/></svg>
+            <strong>Mostrador</strong>
+            <small>Recepción y entrega</small>
+          </button>
+          <button type="button" class="rol" data-rol="admin" role="tab" aria-selected="false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
+            <strong>Administración</strong>
+            <small>Reportes y ajustes</small>
+          </button>
+        </div>
+
+        <form id="formLogin" autocomplete="off">
+          <div class="campo pin-caja">
+            <label for="pin" class="oculto">PIN</label>
+            <input id="pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]*"
+                   maxlength="10" placeholder="• • • •" aria-label="PIN de acceso" required>
+          </div>
+          <p id="loginError" class="login__error" role="alert"></p>
+          <button type="submit" class="btn btn-primario btn-bloque" id="btnEntrar">Entrar</button>
+        </form>
+
+        <div id="demoPins" class="login__demo oculto">
+          <strong>Modo demo.</strong> Mostrador <code>1357</code> · Administración <code>2468</code>.
+          Cambiá estos PINs en las propiedades del script antes de usar datos reales.
+        </div>
+
+        <p class="login__pie">Lavandería demo · Google Sheets + Apps Script</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== APP ===================== -->
+  <div id="app" class="oculto">
+    <header class="topbar">
+      <div class="topbar__inner">
+        <a class="marca" href="#mostrador" id="marcaApp">
+          <span class="marca__icono" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 8.5 12 4l8 4.5v9L12 22l-8-4.5v-9Z"/>
+              <path d="m4 8.5 8 4.5 8-4.5M12 13v9"/>
+            </svg>
+          </span>
+          <span class="marca__texto">
+            <span class="marca__nombre" id="marcaNombre">Lavandería Demo</span>
+            <span class="marca__rol" id="marcaRol">Mostrador</span>
+          </span>
+        </a>
+
+        <nav class="nav" id="navPrincipal" aria-label="Secciones">
+          <button type="button" class="nav__btn" data-vista="mostrador" data-roles="staff,admin">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+            <span>Mostrador</span>
+          </button>
+          <button type="button" class="nav__btn" data-vista="tablero" data-roles="staff,admin">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="16" rx="1.5"/><rect x="14" y="4" width="7" height="10" rx="1.5"/></svg>
+            <span>Tablero</span>
+          </button>
+          <button type="button" class="nav__btn" data-vista="entrega" data-roles="staff,admin">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 7h12l1.5 13h-15L6 7Z"/><path d="M9 7V5a3 3 0 0 1 6 0v2"/></svg>
+            <span>Entrega</span>
+          </button>
+          <button type="button" class="nav__btn" data-vista="reportes" data-roles="admin">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
+            <span>Reportes</span>
+          </button>
+          <button type="button" class="nav__btn" data-vista="configuracion" data-roles="admin">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.64 8.9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9c.21.6.78 1 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1Z"/></svg>
+            <span>Configuración</span>
+          </button>
+        </nav>
+
+        <div class="topbar__acciones">
+          <span class="reloj" id="reloj"></span>
+          <button type="button" class="btn-icono" id="btnSalir" title="Cerrar sesión" aria-label="Cerrar sesión">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <div class="app-shell">
+      <main id="vista" class="vista" aria-live="polite"></main>
+    </div>
+  </div>
+
+  <div class="toast-zona" id="toastZona" aria-live="polite"></div>
+  <div class="capa-carga" id="capaCarga" aria-hidden="true">
+    <div class="capa-carga__caja"><span class="spinner"></span><span id="capaCargaTexto">Guardando…</span></div>
+  </div>
+  <div id="modalZona"></div>
+  <div id="recibo-impresion"></div>
+
+  <?!= include('AppCore') ?>
+  <?!= include('Componentes') ?>
+  <?!= include('VistaMostrador') ?>
+  <?!= include('VistaTablero') ?>
+  <?!= include('VistaEntrega') ?>
+  <?!= include('VistaReportes') ?>
+  <?!= include('VistaConfiguracion') ?>
+
+  <script>
+    window.BOOT = <?!= jsonSeguro_({
+      negocio: datosNegocio_(cfg),
+      authConfigurada: getAuthConfigurada_(),
+      scriptUrl: scriptUrl
+    }) ?>;
+    App.iniciar();
+  </script>
+</body>
+</html>

@@ -1,0 +1,300 @@
+<style>
+  .reportes-filtros {
+    display: flex;
+    align-items: flex-end;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .reportes-filtros .campo { margin: 0; max-width: 170px; }
+  .reportes-filtros .chips { margin-left: auto; }
+  .reportes-filtros .chip { padding: 8px 14px; font-size: 13px; }
+
+  .kpi--money .kpi__valor { font-size: clamp(19px, 2.4vw, 26px); }
+
+  .metodo-fila {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px dashed var(--linea);
+  }
+  .metodo-fila:last-child { border-bottom: 0; }
+  .metodo-fila__icono {
+    width: 34px; height: 34px; flex: 0 0 34px;
+    border-radius: 10px; display: grid; place-items: center;
+    background: var(--fondo-tenue); color: var(--color-primario);
+  }
+  .metodo-fila__icono svg { width: 18px; height: 18px; }
+  .metodo-fila__nombre { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 600; }
+  .metodo-fila__barra {
+    height: 6px; border-radius: 999px; background: #EDF2F3; overflow: hidden; margin-top: 5px;
+  }
+  .metodo-fila__barra i { display: block; height: 100%; border-radius: 999px; background: var(--color-secundario); }
+  .metodo-fila__monto { font-weight: 700; font-variant-numeric: tabular-nums; font-size: 14px; }
+
+  .reporte-vacio { padding: 30px 12px; text-align: center; color: var(--tinta-suave); font-size: 13px; }
+</style>
+
+<script>
+  /* ==========================================================================
+     VISTA REPORTES — facturación, cobros, servicios y saldo activo.
+     ========================================================================== */
+  (function () {
+    'use strict';
+
+    var V = window.Vistas = window.Vistas || {};
+
+    function sumarDiasISO(iso, dias) {
+      var p = iso.split('-');
+      var t = Date.UTC(Number(p[0]), Number(p[1]) - 1, Number(p[2])) + dias * 86400000;
+      return new Date(t).toISOString().slice(0, 10);
+    }
+
+    function etiquetaDia(iso) {
+      return iso.slice(8, 10) + '/' + iso.slice(5, 7);
+    }
+
+    function montar(cont) {
+      var hoy = App.ctx.hoy;
+      var s = {
+        desde: sumarDiasISO(hoy, -6),
+        hasta: hoy,
+        datos: null,
+        cargando: false
+      };
+
+      cont.innerHTML =
+        '<div class="vista__cabecera">' +
+          '<div>' +
+            '<h1 class="vista__titulo">Reportes</h1>' +
+            '<p class="vista__bajada">Facturación, cobros y servicios del período.</p>' +
+          '</div>' +
+          '<span class="chip-info" id="rRango"></span>' +
+        '</div>' +
+
+        '<section class="tarjeta" style="padding:14px 16px;margin-bottom:16px">' +
+          '<div class="reportes-filtros">' +
+            '<div class="campo">' +
+              '<label for="rDesde">Desde</label>' +
+              '<input id="rDesde" type="date" max="' + App.esc(hoy) + '" value="' + App.esc(s.desde) + '">' +
+            '</div>' +
+            '<div class="campo">' +
+              '<label for="rHasta">Hasta</label>' +
+              '<input id="rHasta" type="date" max="' + App.esc(hoy) + '" value="' + App.esc(s.hasta) + '">' +
+            '</div>' +
+            '<button type="button" class="btn btn-primario btn-chico" id="rAplicar">Ver reporte</button>' +
+            '<div class="chips" id="rPresets">' +
+              '<button type="button" class="chip" data-dias="0">Hoy</button>' +
+              '<button type="button" class="chip" data-dias="6">7 días</button>' +
+              '<button type="button" class="chip" data-dias="29">30 días</button>' +
+            '</div>' +
+          '</div>' +
+        '</section>' +
+
+        '<div id="rContenido">' +
+          '<div class="cargando-bloque"><span class="spinner"></span>Cargando reporte…</div>' +
+        '</div>';
+
+      var el = {
+        desde: App.$('#rDesde', cont),
+        hasta: App.$('#rHasta', cont),
+        aplicar: App.$('#rAplicar', cont),
+        presets: App.$('#rPresets', cont),
+        rango: App.$('#rRango', cont),
+        contenido: App.$('#rContenido', cont)
+      };
+
+      el.rango.textContent = App.fechaLargaISO(s.desde) + ' → ' + App.fechaLargaISO(s.hasta);
+
+      function pintarKpis(d) {
+        var k = d.kpis;
+        return '<div class="kpis">' +
+          '<div class="kpi kpi--acento kpi--money">' +
+            '<div class="kpi__label">Facturado</div>' +
+            '<div class="kpi__valor">' + App.bs(k.facturado) + '</div>' +
+            '<div class="kpi__detalle">' + App.num(k.ordenes) + ' pedidos en el rango</div>' +
+          '</div>' +
+          '<div class="kpi kpi--money">' +
+            '<div class="kpi__label">Cobrado</div>' +
+            '<div class="kpi__valor">' + App.bs(d.cobradoEnRango) + '</div>' +
+            '<div class="kpi__detalle">Pagos registrados en el rango</div>' +
+          '</div>' +
+          '<div class="kpi kpi--money">' +
+            '<div class="kpi__label">Ticket promedio</div>' +
+            '<div class="kpi__valor">' + App.bs(k.ticketPromedio) + '</div>' +
+            '<div class="kpi__detalle">Por pedido recibido</div>' +
+          '</div>' +
+          '<div class="kpi">' +
+            '<div class="kpi__label">Prendas</div>' +
+            '<div class="kpi__valor">' + App.num(k.prendas) + '</div>' +
+            '<div class="kpi__detalle">' + App.kg(k.kg) + ' de ropa</div>' +
+          '</div>' +
+          '<div class="kpi">' +
+            '<div class="kpi__label">Entregadas</div>' +
+            '<div class="kpi__valor">' + App.num(k.entregadas) + '</div>' +
+            '<div class="kpi__detalle">' + App.bs(k.entregadasMonto) + ' facturado</div>' +
+          '</div>' +
+          '<div class="kpi kpi--money">' +
+            '<div class="kpi__label">Saldo activo</div>' +
+            '<div class="kpi__valor">' + App.bs(d.saldoPendiente) + '</div>' +
+            '<div class="kpi__detalle">' + App.num(d.ordenesActivas) + ' pedidos sin entregar</div>' +
+          '</div>' +
+        '</div>';
+      }
+
+      function pintarBarras(d) {
+        var dias = d.porDia || [];
+        if (!dias.length) {
+          return '<div class="reporte-vacio">Sin días para graficar en este rango.</div>';
+        }
+
+        var max = dias.reduce(function (m, x) { return Math.max(m, Number(x.monto) || 0); }, 0);
+        var salto = dias.length > 14 ? Math.ceil(dias.length / 7) : 1;
+        var hayCobros = max > 0;
+
+        var barras = dias.map(function (x, i) {
+          var monto = Number(x.monto) || 0;
+          var alto = max > 0 ? Math.max(3, Math.round((monto / max) * 100)) : 3;
+          var mostrar = i === 0 || i === dias.length - 1 || i % salto === 0;
+          return '<div class="barra-dia" title="' + App.esc(App.fechaISO(x.fecha) + ' · ' + App.bs(monto) +
+              ' · ' + x.ordenes + ' pedidos') + '">' +
+            '<span class="barra-dia__valor">' + (monto > 0 ? App.bs(monto) : '') + '</span>' +
+            '<span class="barra-dia__columna" style="height:' + alto + '%' +
+              (monto > 0 ? '' : ';background:#E6EDEE') + '"></span>' +
+            '<span class="barra-dia__dia">' + (mostrar ? etiquetaDia(x.fecha) : '') + '</span>' +
+          '</div>';
+        }).join('');
+
+        return '<div class="barras">' + barras + '</div>' +
+          '<p class="ayuda" style="margin:8px 0 0">' +
+            (hayCobros ? 'Cobros registrados por día.' : 'Todavía no hay cobros en este rango.') +
+          '</p>';
+      }
+
+      function pintarMetodos(d) {
+        var total = (d.porMetodo || []).reduce(function (t, m) { return t + (Number(m.monto) || 0); }, 0);
+        var filas = (d.porMetodo || []).map(function (m) {
+          var monto = Number(m.monto) || 0;
+          var pct = total > 0 ? Math.round((monto / total) * 100) : 0;
+          var icono = m.metodo === 'qr' ? App.icono('qr') : App.icono('efectivo');
+          return '<div class="metodo-fila">' +
+            '<span class="metodo-fila__icono">' + icono + '</span>' +
+            '<span class="metodo-fila__nombre">' + App.esc(m.label) +
+              '<span class="metodo-fila__barra"><i style="width:' + pct + '%"></i></span>' +
+            '</span>' +
+            '<span class="metodo-fila__monto">' + App.bs(monto) + '</span>' +
+          '</div>';
+        }).join('');
+
+        return '<div class="tarjeta">' +
+          '<h2 class="seccion-titulo" style="font-size:16px">Cobros por método</h2>' +
+          (filas || '<p class="ayuda">Sin cobros registrados.</p>') +
+          '<p class="ayuda" style="margin:10px 0 0">Total cobrado: <strong>' + App.bs(total) + '</strong></p>' +
+        '</div>';
+      }
+
+      function pintarServicios(d) {
+        var servicios = d.porServicio || [];
+        var filas = servicios.map(function (x) {
+          var unidad = x.unidad === 'kg' ? App.kg(x.cantidad) : App.num(x.cantidad) + ' u.';
+          return '<tr>' +
+            '<td>' + App.esc(x.nombre) + '</td>' +
+            '<td class="num">' + App.esc(unidad) + '</td>' +
+            '<td class="num">' + App.bs(x.monto) + '</td>' +
+          '</tr>';
+        }).join('');
+
+        return '<div class="tarjeta">' +
+          '<h2 class="seccion-titulo" style="font-size:16px">Servicios vendidos</h2>' +
+          (servicios.length
+            ? '<div class="tabla-scroll"><table class="tabla-simple">' +
+                '<thead><tr><th>Servicio</th><th class="num">Cantidad</th><th class="num">Monto</th></tr></thead>' +
+                '<tbody>' + filas + '</tbody>' +
+              '</table></div>'
+            : '<div class="reporte-vacio">Sin servicios vendidos en el rango. Cargá datos de ejemplo desde Configuración.</div>') +
+        '</div>';
+      }
+
+      function pintar() {
+        var d = s.datos;
+        if (!d) return;
+
+        el.rango.textContent = App.fechaLargaISO(d.desde) + ' → ' + App.fechaLargaISO(d.hasta);
+
+        el.contenido.innerHTML =
+          pintarKpis(d) +
+          '<div class="grilla grilla--reportes" style="margin-bottom:16px">' +
+            '<div class="tarjeta">' +
+              '<h2 class="seccion-titulo" style="font-size:16px">Cobros por día</h2>' +
+              pintarBarras(d) +
+            '</div>' +
+            pintarMetodos(d) +
+          '</div>' +
+          pintarServicios(d);
+      }
+
+      function cargar() {
+        if (s.cargando) return;
+        s.cargando = true;
+        el.aplicar.disabled = true;
+        App.cargando(1, 'Armando reporte…');
+
+        App.api('getReportes', App.sesion.token, s.desde, s.hasta).then(function (res) {
+          s.cargando = false;
+          el.aplicar.disabled = false;
+          App.cargando(-1);
+
+          if (!res.ok) {
+            App.toast(res.error || 'No pudimos armar el reporte.', 'error');
+            if (!/Sesi[oó]n vencida/i.test(res.error || '')) {
+              el.contenido.innerHTML = '<div class="vacio-bloque"><strong>No pudimos cargar el reporte.</strong>' +
+                App.esc(res.error || '') + '</div>';
+            }
+            return;
+          }
+
+          s.datos = res;
+          s.desde = res.desde;
+          s.hasta = res.hasta;
+          el.desde.value = res.desde;
+          el.hasta.value = res.hasta;
+          pintar();
+        });
+      }
+
+      function aplicarRango(desde, hasta) {
+        if (!desde || !hasta) {
+          App.toast('Elegí las dos fechas.', 'error');
+          return;
+        }
+        if (hasta < desde) {
+          App.toast('La fecha "hasta" no puede ser anterior a "desde".', 'error');
+          return;
+        }
+        s.desde = desde;
+        s.hasta = hasta;
+        cargar();
+      }
+
+      el.aplicar.addEventListener('click', function () {
+        aplicarRango(el.desde.value, el.hasta.value);
+      });
+
+      el.presets.addEventListener('click', function (ev) {
+        var boton = ev.target.closest('[data-dias]');
+        if (!boton) return;
+        var dias = Number(boton.getAttribute('data-dias')) || 0;
+        var desde = sumarDiasISO(hoy, -dias);
+        el.desde.value = desde;
+        el.hasta.value = hoy;
+        aplicarRango(desde, hoy);
+      });
+
+      cargar();
+
+      return function limpiar() { /* sin listeners globales */ };
+    }
+
+    V.reportes = { montar: montar };
+  })();
+</script>

@@ -1,0 +1,604 @@
+<style>
+  .config-nav {
+    position: sticky;
+    top: 64px;
+    z-index: 20;
+    padding: 8px 0 10px;
+    margin-bottom: 8px;
+    background: color-mix(in srgb, #FBFAF7 88%, transparent);
+    backdrop-filter: blur(10px);
+  }
+  .config-nav .chip { padding: 8px 14px; font-size: 13px; cursor: pointer; }
+  .config-seccion { scroll-margin-top: 130px; margin-bottom: 16px; }
+  .config-seccion .seccion-titulo { margin-bottom: 12px; }
+  .config-seccion .grilla--2, .config-seccion .grilla--3 { gap: 0 14px; }
+
+  .campo input[type="color"] {
+    padding: 4px;
+    height: 46px;
+    cursor: pointer;
+  }
+
+  .qr-preview {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: var(--fondo-tenue);
+    margin-top: 8px;
+  }
+  .qr-preview img {
+    width: 86px;
+    height: 86px;
+    border-radius: 8px;
+    background: #fff;
+    padding: 5px;
+    box-shadow: 0 2px 8px rgba(15, 60, 70, .1);
+  }
+  .qr-preview p { margin: 0; font-size: 11.5px; color: var(--tinta-suave); line-height: 1.45; }
+  .qr-preview strong { display: block; color: var(--color-texto); font-size: 12.5px; margin-bottom: 2px; }
+
+  .servicio-tipo {
+    display: inline-flex;
+    align-items: center;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: #ECF1F2;
+    color: #54666B;
+    white-space: nowrap;
+  }
+  .servicio-tipo--kg { background: #E2F3F5; color: #0B6B7A; }
+
+  .demo-acciones { display: flex; gap: 10px; flex-wrap: wrap; }
+  .demo-nota {
+    margin-top: 14px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: #FBF4E7;
+    border: 1px dashed #E5CFA6;
+    color: #7A5A1D;
+    font-size: 12px;
+    line-height: 1.55;
+  }
+  .demo-nota code { font-weight: 700; }
+
+  .guardar-barra {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 10px 0 0;
+  }
+
+  /* La tabla de servicios necesita ancho mínimo; el contenedor la desplaza. */
+  @media (max-width: 680px) {
+    .tabla-servicios { min-width: 560px; }
+  }
+
+  /* En móvil, barra flotante para guardar sin volver arriba. */
+  @media (max-width: 640px) {
+    .guardar-barra {
+      position: sticky;
+      bottom: 14px;
+      z-index: 25;
+      padding: 10px 12px;
+      border-radius: 16px;
+      background: color-mix(in srgb, #fff 90%, transparent);
+      backdrop-filter: blur(10px);
+      box-shadow: 0 10px 30px rgba(15, 60, 70, .14);
+      border: 1px solid var(--color-borde);
+    }
+  }
+</style>
+
+<script>
+  /* ==========================================================================
+     VISTA CONFIGURACIÓN — datos del negocio, precios, mensajes, servicios y
+     herramientas de demo. Solo accesible para administración.
+     ========================================================================== */
+  (function () {
+    'use strict';
+
+    var V = window.Vistas = window.Vistas || {};
+
+    var DIAS = [
+      ['1', 'Lun'], ['2', 'Mar'], ['3', 'Mié'], ['4', 'Jue'], ['5', 'Vie'], ['6', 'Sáb'], ['0', 'Dom']
+    ];
+
+    function colorSeguro(valor, fallback) {
+      var v = String(valor || '').trim();
+      return /^#[0-9a-fA-F]{6}$/.test(v) ? v : fallback;
+    }
+
+    function montar(cont) {
+      var s = { config: null, servicios: [], guardando: false };
+
+      cont.innerHTML = '<div class="cargando-bloque"><span class="spinner"></span>Cargando configuración…</div>';
+
+      function campo(clave, label, valor, opciones) {
+        var o = opciones || {};
+        var tipo = o.tipo || 'text';
+        var attrs = 'id="c_' + clave + '" data-clave="' + clave + '"';
+        if (o.inputmode) attrs += ' inputmode="' + o.inputmode + '"';
+        if (o.min != null) attrs += ' min="' + o.min + '"';
+        if (o.max != null) attrs += ' max="' + o.max + '"';
+        if (o.maxlength) attrs += ' maxlength="' + o.maxlength + '"';
+        if (o.placeholder) attrs += ' placeholder="' + App.esc(o.placeholder) + '"';
+
+        var control;
+        if (tipo === 'textarea') {
+          control = '<textarea ' + attrs + ' rows="' + (o.rows || 3) + '">' + App.esc(valor) + '</textarea>';
+        } else if (tipo === 'color') {
+          control = '<input ' + attrs + ' type="color" value="' + App.esc(valor) + '">';
+        } else {
+          control = '<input ' + attrs + ' type="' + tipo + '" value="' + App.esc(valor) + '">';
+        }
+
+        return '<div class="campo" style="' + (o.style || '') + '">' +
+          '<label for="c_' + clave + '">' + App.esc(label) + '</label>' +
+          control +
+          (o.ayuda ? '<p class="ayuda" style="margin:6px 0 0">' + App.esc(o.ayuda) + '</p>' : '') +
+        '</div>';
+      }
+
+      function template(cfg) {
+        var cerrados = String(cfg.dias_cerrados || '').split(',').map(Number);
+        var chipsDias = DIAS.map(function (d) {
+          var activo = cerrados.indexOf(Number(d[0])) > -1;
+          return '<label class="chip' + (activo ? ' seleccionada' : '') + '" style="cursor:pointer">' +
+            '<input type="checkbox" value="' + d[0] + '"' + (activo ? ' checked' : '') + ' style="display:none">' +
+            d[1] +
+          '</label>';
+        }).join('');
+
+        var primario = colorSeguro(cfg.color_primario, '#0B4F60');
+        var secundario = colorSeguro(cfg.color_secundario, '#B7791F');
+        var acento = colorSeguro(cfg.color_acento, '#E7F1F3');
+        var qr = String(cfg.pago_qr_url || '');
+
+        return '<div class="vista__cabecera">' +
+            '<div>' +
+              '<h1 class="vista__titulo">Configuración</h1>' +
+              '<p class="vista__bajada">Datos del local, precios, mensajes y catálogo de servicios.</p>' +
+            '</div>' +
+            '<button type="button" class="btn btn-primario btn-chico" id="cGuardarTop">Guardar cambios</button>' +
+          '</div>' +
+
+          '<div class="chips config-nav" id="cNav">' +
+            '<button type="button" class="chip" data-ir="cNegocio">Negocio</button>' +
+            '<button type="button" class="chip" data-ir="cOperacion">Precios y entregas</button>' +
+            '<button type="button" class="chip" data-ir="cMensajes">Apariencia y mensajes</button>' +
+            '<button type="button" class="chip" data-ir="cServiciosSeccion">Servicios</button>' +
+            '<button type="button" class="chip" data-ir="cDemo">Demo</button>' +
+          '</div>' +
+
+          '<section class="tarjeta config-seccion" id="cNegocio">' +
+            '<h2 class="seccion-titulo">Datos del negocio</h2>' +
+            '<div class="grilla grilla--2">' +
+              campo('negocio_nombre', 'Nombre del negocio', cfg.negocio_nombre, { maxlength: 60 }) +
+              campo('negocio_ciudad', 'Ciudad', cfg.negocio_ciudad, { maxlength: 60 }) +
+              campo('negocio_whatsapp', 'WhatsApp del negocio', cfg.negocio_whatsapp, {
+                tipo: 'tel', inputmode: 'numeric', maxlength: 15,
+                ayuda: 'Celular boliviano de 8 dígitos. Se usa para los avisos y el link de contacto.'
+              }) +
+              campo('negocio_telefono', 'Teléfono visible', cfg.negocio_telefono, {
+                tipo: 'tel', inputmode: 'numeric', maxlength: 15
+              }) +
+            '</div>' +
+            campo('negocio_direccion', 'Dirección', cfg.negocio_direccion, { maxlength: 120 }) +
+            '<div class="grilla grilla--2">' +
+              campo('horario_apertura', 'Abre a las', cfg.horario_apertura, { tipo: 'time' }) +
+              campo('horario_cierre', 'Cierra a las', cfg.horario_cierre, { tipo: 'time' }) +
+            '</div>' +
+            '<p class="ayuda" style="margin:0">Zona horaria: <strong>' + App.esc(App.ctx.negocio.zonaHoraria) +
+              '</strong> · Moneda: <strong>' + App.esc(App.ctx.negocio.monedaSimbolo) +
+              '</strong>. Se configuran directo en la hoja <code>Config</code>.</p>' +
+          '</section>' +
+
+          '<section class="tarjeta config-seccion" id="cOperacion">' +
+            '<h2 class="seccion-titulo">Precios y entregas</h2>' +
+            '<div class="grilla grilla--2">' +
+              campo('minimo_kg', 'Mínimo por orden (kg)', cfg.minimo_kg, {
+                inputmode: 'decimal', ayuda: 'Si el peso real es menor, se cobra este mínimo.'
+              }) +
+              campo('recargo_express', 'Recargo express (Bs.)', cfg.recargo_express, { inputmode: 'decimal' }) +
+              campo('precio_planchado_pieza', 'Planchado extra por pieza (Bs.)', cfg.precio_planchado_pieza, {
+                inputmode: 'decimal'
+              }) +
+              campo('dias_entrega_lavado', 'Días de entrega · lavado', cfg.dias_entrega_lavado, {
+                tipo: 'number', min: 0, max: 30
+              }) +
+              campo('dias_entrega_planchado', 'Días de entrega · con planchado', cfg.dias_entrega_planchado, {
+                tipo: 'number', min: 0, max: 30
+              }) +
+              campo('dias_entrega_express', 'Días de entrega · express', cfg.dias_entrega_express, {
+                tipo: 'number', min: 0, max: 30
+              }) +
+            '</div>' +
+            '<div class="campo" style="margin-bottom:0">' +
+              '<label>Días que no trabajás</label>' +
+              '<div class="chips" id="cDias">' + chipsDias + '</div>' +
+              '<p class="ayuda" style="margin:6px 0 0">Se saltean al calcular la fecha prometida. Sin ninguno marcado, se entrega todos los días.</p>' +
+            '</div>' +
+          '</section>' +
+
+          '<section class="tarjeta config-seccion" id="cMensajes">' +
+            '<h2 class="seccion-titulo">Apariencia y mensajes</h2>' +
+            '<div class="grilla grilla--3">' +
+              campo('color_primario', 'Color principal', primario, { tipo: 'color' }) +
+              campo('color_secundario', 'Color secundario', secundario, { tipo: 'color' }) +
+              campo('color_acento', 'Color de fondo suave', acento, { tipo: 'color' }) +
+            '</div>' +
+            campo('whatsapp_plantilla', 'Mensaje de WhatsApp', cfg.whatsapp_plantilla, {
+              tipo: 'textarea', rows: 8,
+              ayuda: 'Placeholders: {cliente} {codigo} {negocio} {total} {saldo} {pendiente} {prendas} {peso} {link} {direccion} {horario} {fecha_prometida}'
+            }) +
+            campo('pago_qr_url', 'URL de la imagen QR de pago', qr, {
+              inputmode: 'url',
+              ayuda: 'Por ejemplo el QR de tu banco o una imagen alojada. Se muestra en la entrega y en el estado público.'
+            }) +
+            '<div class="qr-preview" id="cQrPreview"' + (qr ? '' : ' style="display:none"') + '>' +
+              '<img id="cQrImagen" src="' + App.esc(qr) + '" alt="Vista previa del QR de pago">' +
+              '<p><strong>Vista previa</strong>Si la imagen no carga, revisá que la URL sea pública y directa.</p>' +
+            '</div>' +
+            campo('pago_instrucciones', 'Instrucciones de pago', cfg.pago_instrucciones, {
+              tipo: 'textarea', rows: 2
+            }) +
+            campo('pie_pagina_recibo', 'Pie de página del recibo', cfg.pie_pagina_recibo, { maxlength: 120 }) +
+          '</section>' +
+
+          '<section class="tarjeta config-seccion" id="cServiciosSeccion">' +
+            '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px">' +
+              '<h2 class="seccion-titulo" style="margin:0">Servicios y precios</h2>' +
+              '<button type="button" class="btn btn-secundario btn-chico" id="cNuevoServicio">' +
+                App.icono('mas') + ' Nuevo servicio</button>' +
+            '</div>' +
+            '<p class="ayuda" style="margin:-2px 0 12px">Tiene que quedar al menos un servicio por kilo activo. Los cambios aplican a las órdenes nuevas; las existentes conservan su precio.</p>' +
+            '<div id="cServicios"></div>' +
+          '</section>' +
+
+          '<section class="tarjeta config-seccion" id="cDemo">' +
+            '<h2 class="seccion-titulo">Datos de demostración</h2>' +
+            '<div class="demo-acciones">' +
+              '<button type="button" class="btn btn-secundario btn-chico" id="cSeed">Cargar datos de ejemplo</button>' +
+              '<button type="button" class="btn btn-secundario btn-chico" id="cCache">Limpiar caché</button>' +
+              '<button type="button" class="btn btn-peligro btn-chico" id="cReset">Reiniciar demo</button>' +
+            '</div>' +
+            '<div class="demo-nota">' +
+              '<strong>PINs de acceso.</strong> Se guardan en las <em>Propiedades del script</em> como ' +
+              '<code>ADMIN_PIN</code> y <code>STAFF_PIN</code>. Los valores de demo son ' +
+              '<code>2468</code> (administración) y <code>1357</code> (mostrador). ' +
+              'Cambialos antes de usar la app con datos reales.<br><br>' +
+              '<strong>Reiniciar demo</strong> borra pedidos, líneas, eventos, pagos y avisos, y vuelve a cargar los 8 pedidos de ejemplo. ' +
+              'Los clientes y los servicios quedan como están.' +
+            '</div>' +
+          '</section>' +
+
+          '<div class="guardar-barra">' +
+            '<button type="button" class="btn btn-primario" id="cGuardarBottom">Guardar cambios</button>' +
+          '</div>';
+      }
+
+      function pintarServicios() {
+        var destino = App.$('#cServicios', cont);
+        if (!destino) return;
+
+        if (!s.servicios.length) {
+          destino.innerHTML = '<div class="vacio-bloque">No hay servicios cargados.</div>';
+          return;
+        }
+
+        var filas = s.servicios.map(function (serv) {
+          return '<tr>' +
+            '<td>' +
+              '<strong>' + App.esc(serv.nombre) + '</strong>' +
+              (serv.descripcion ? '<div class="ayuda">' + App.esc(serv.descripcion) + '</div>' : '') +
+            '</td>' +
+            '<td><span class="servicio-tipo' + (serv.tipo === 'kg' ? ' servicio-tipo--kg' : '') + '">' +
+              (serv.tipo === 'kg' ? 'Por kilo' : 'Por pieza') + '</span></td>' +
+            '<td class="num">' + App.bs(serv.precio) + (serv.tipo === 'kg' ? ' / kg' : '') + '</td>' +
+            '<td>' + (serv.incluyePlanchado ? 'Sí' : '—') + '</td>' +
+            '<td>' +
+              '<button type="button" class="chip' + (serv.activo ? ' seleccionada' : '') + '" ' +
+                'data-toggle="' + serv.id + '" style="padding:5px 11px;font-size:11.5px">' +
+                (serv.activo ? 'Activo' : 'Inactivo') +
+              '</button>' +
+            '</td>' +
+            '<td class="num">' +
+              '<button type="button" class="btn btn-secundario btn-xs" data-editar="' + serv.id + '">Editar</button>' +
+            '</td>' +
+          '</tr>';
+        }).join('');
+
+        destino.innerHTML = '<div class="tabla-scroll"><table class="tabla-simple tabla-servicios">' +
+          '<thead><tr>' +
+            '<th>Servicio</th><th>Tipo</th><th class="num">Precio</th>' +
+            '<th>Planchado</th><th>Estado</th><th class="num"></th>' +
+          '</tr></thead>' +
+          '<tbody>' + filas + '</tbody>' +
+        '</table></div>';
+      }
+
+      function abrirServicio(serv) {
+        var esNuevo = !serv;
+        App.modal({
+          titulo: esNuevo ? 'Nuevo servicio' : 'Editar servicio',
+          sub: esNuevo ? 'Se agrega al catálogo del mostrador.' : serv.nombre,
+          ancho: 'angosto',
+          cuerpo:
+            '<div class="campo">' +
+              '<label for="sNombre">Nombre</label>' +
+              '<input id="sNombre" type="text" maxlength="60" value="' + App.esc(esNuevo ? '' : serv.nombre) + '">' +
+            '</div>' +
+            '<div class="grilla grilla--2">' +
+              '<div class="campo">' +
+                '<label for="sTipo">Tipo de cobro</label>' +
+                '<select id="sTipo">' +
+                  '<option value="kg"' + (esNuevo || serv.tipo === 'kg' ? ' selected' : '') + '>Por kilo</option>' +
+                  '<option value="pieza"' + (!esNuevo && serv.tipo === 'pieza' ? ' selected' : '') + '>Por pieza</option>' +
+                '</select>' +
+              '</div>' +
+              '<div class="campo">' +
+                '<label for="sPrecio">Precio (Bs.)</label>' +
+                '<input id="sPrecio" type="text" inputmode="decimal" value="' +
+                  App.esc(esNuevo ? '' : String(serv.precio)) + '">' +
+              '</div>' +
+            '</div>' +
+            '<label class="interruptor" style="margin-bottom:12px">' +
+              '<input type="checkbox" id="sPlanchado"' + (!esNuevo && serv.incluyePlanchado ? ' checked' : '') + '>' +
+              '<span class="interruptor__pista"></span>' +
+              '<span class="interruptor__texto"><strong>Incluye planchado</strong><span>Se usa para el tablero y la fecha de entrega.</span></span>' +
+            '</label>' +
+            '<label class="interruptor" style="margin-bottom:12px">' +
+              '<input type="checkbox" id="sActivo"' + (esNuevo || serv.activo ? ' checked' : '') + '>' +
+              '<span class="interruptor__pista"></span>' +
+              '<span class="interruptor__texto"><strong>Activo</strong><span>Los inactivos no se muestran en mostrador.</span></span>' +
+            '</label>' +
+            '<div class="campo" style="margin-bottom:0">' +
+              '<label for="sDescripcion">Descripción corta</label>' +
+              '<input id="sDescripcion" type="text" maxlength="120" value="' +
+                App.esc(esNuevo ? '' : serv.descripcion) + '" placeholder="Ej. ropa de trabajo, secado al aire">' +
+            '</div>',
+          acciones: [
+            { label: 'Cancelar', clase: 'btn-texto' },
+            {
+              label: esNuevo ? 'Crear servicio' : 'Guardar',
+              clase: 'btn-primario',
+              onClick: function (el) {
+                var datos = {
+                  nombre: App.$('#sNombre', el).value,
+                  tipo: App.$('#sTipo', el).value,
+                  precio: App.$('#sPrecio', el).value,
+                  incluyePlanchado: App.$('#sPlanchado', el).checked,
+                  activo: App.$('#sActivo', el).checked,
+                  descripcion: App.$('#sDescripcion', el).value
+                };
+                if (!esNuevo) datos.id = serv.id;
+
+                App.api('guardarServicioAdmin', App.sesion.token, datos).then(function (res) {
+                  if (!res.ok) {
+                    App.toast(res.error || 'No pudimos guardar el servicio.', 'error');
+                    return;
+                  }
+                  App.cerrarModal();
+                  App.toast(esNuevo ? 'Servicio creado.' : 'Servicio actualizado.', 'exito');
+
+                  if (esNuevo) {
+                    s.servicios.push(res.servicio);
+                  } else {
+                    s.servicios = s.servicios.map(function (x) {
+                      return x.id === res.servicio.id ? res.servicio : x;
+                    });
+                  }
+                  s.servicios.sort(function (a, b) {
+                    var ca = a.categoria === 'general' ? 0 : 1;
+                    var cb = b.categoria === 'general' ? 0 : 1;
+                    if (ca !== cb) return ca - cb;
+                    return String(a.nombre).localeCompare(String(b.nombre), 'es');
+                  });
+                  pintarServicios();
+                  App.recargarContexto();
+                });
+                return false;
+              }
+            }
+          ]
+        });
+
+        window.setTimeout(function () {
+          var primero = App.$('#sNombre');
+          if (primero) primero.focus();
+        }, 60);
+      }
+
+      function recolectar() {
+        var datos = {};
+        App.$$('[data-clave]', cont).forEach(function (input) {
+          datos[input.getAttribute('data-clave')] = input.value;
+        });
+        datos.dias_cerrados = App.$$('#cDias input:checked', cont).map(function (i) {
+          return i.value;
+        }).join(',');
+        return datos;
+      }
+
+      function actualizarCabecera(datos) {
+        var nombre = datos.negocio_nombre || (App.ctx.negocio && App.ctx.negocio.nombre) || 'Lavandería';
+        var marca = document.getElementById('marcaNombre');
+        if (marca) marca.textContent = nombre;
+        document.title = 'Configuración · ' + nombre;
+
+        ['primario', 'secundario', 'acento'].forEach(function (k) {
+          var valor = datos['color_' + k];
+          if (valor && /^#[0-9a-fA-F]{6}$/.test(valor)) {
+            document.documentElement.style.setProperty('--color-' + k, valor);
+          }
+        });
+      }
+
+      function guardar() {
+        if (s.guardando) return;
+        s.guardando = true;
+        var botones = [App.$('#cGuardarTop', cont), App.$('#cGuardarBottom', cont)];
+
+        botones.forEach(function (b) { if (b) { b.disabled = true; b.textContent = 'Guardando…'; } });
+
+        var datos = recolectar();
+        App.api('guardarConfigAdmin', App.sesion.token, datos).then(function (res) {
+          s.guardando = false;
+          botones.forEach(function (b) {
+            if (b) { b.disabled = false; b.textContent = 'Guardar cambios'; }
+          });
+
+          if (!res.ok) {
+            App.toast(res.error || 'No pudimos guardar la configuración.', 'error');
+            return;
+          }
+
+          s.config = datos;
+          App.recargarContexto().then(function (ok) {
+            if (ok) actualizarCabecera(datos);
+            App.toast(res.mensaje || 'Configuración guardada.', 'exito');
+          });
+        });
+      }
+
+      function bind() {
+        App.$('#cGuardarTop', cont).addEventListener('click', guardar);
+        App.$('#cGuardarBottom', cont).addEventListener('click', guardar);
+
+        App.$('#cNav', cont).addEventListener('click', function (ev) {
+          var boton = ev.target.closest('[data-ir]');
+          if (!boton) return;
+          var destino = App.$('#' + boton.getAttribute('data-ir'), cont);
+          if (destino) destino.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+
+        App.$('#cDias', cont).addEventListener('change', function (ev) {
+          var input = ev.target;
+          if (!input || input.type !== 'checkbox') return;
+          var chip = input.closest('.chip');
+          if (chip) chip.classList.toggle('seleccionada', input.checked);
+        });
+
+        App.$('#cNuevoServicio', cont).addEventListener('click', function () { abrirServicio(null); });
+
+        App.$('#cServicios', cont).addEventListener('click', function (ev) {
+          var toggle = ev.target.closest('[data-toggle]');
+          if (toggle) {
+            var id = Number(toggle.getAttribute('data-toggle'));
+            var serv = s.servicios.filter(function (x) { return x.id === id; })[0];
+            if (!serv) return;
+            App.api('cambiarServicioActivoAdmin', App.sesion.token, id, !serv.activo).then(function (res) {
+              if (!res.ok) {
+                App.toast(res.error || 'No pudimos cambiar el estado.', 'error');
+                return;
+              }
+              s.servicios = s.servicios.map(function (x) {
+                return x.id === res.servicio.id ? res.servicio : x;
+              });
+              pintarServicios();
+              App.recargarContexto();
+            });
+            return;
+          }
+
+          var editar = ev.target.closest('[data-editar]');
+          if (editar) {
+            var idEditar = Number(editar.getAttribute('data-editar'));
+            var encontrado = s.servicios.filter(function (x) { return x.id === idEditar; })[0];
+            if (encontrado) abrirServicio(encontrado);
+          }
+        });
+
+        var qrInput = App.$('[data-clave="pago_qr_url"]', cont);
+        var qrCaja = App.$('#cQrPreview', cont);
+        var qrImagen = App.$('#cQrImagen', cont);
+        if (qrInput && qrCaja && qrImagen) {
+          qrInput.addEventListener('input', function () {
+            var url = qrInput.value.trim();
+            if (url && /^https?:\/\//i.test(url)) {
+              qrImagen.src = url;
+              qrCaja.style.display = '';
+            } else {
+              qrCaja.style.display = 'none';
+            }
+          });
+          qrImagen.addEventListener('error', function () {
+            qrImagen.style.visibility = 'hidden';
+          });
+          qrImagen.addEventListener('load', function () {
+            qrImagen.style.visibility = '';
+          });
+        }
+
+        App.$('#cSeed', cont).addEventListener('click', function () {
+          App.cargando(1, 'Cargando datos de ejemplo…');
+          App.api('cargarDemoAdmin', App.sesion.token).then(function (res) {
+            App.cargando(-1);
+            if (!res.ok) {
+              App.toast(res.error || 'No pudimos cargar los datos.', 'error');
+              return;
+            }
+            var extra = res.ordenesCreadas ? ' (' + res.ordenesCreadas + ' pedidos)' : '';
+            App.toast((res.mensaje || 'Datos cargados.') + extra, 'exito');
+          });
+        });
+
+        App.$('#cCache', cont).addEventListener('click', function () {
+          App.api('limpiarCacheAdmin', App.sesion.token).then(function (res) {
+            App.toast(res.ok ? (res.mensaje || 'Caché limpio.') : (res.error || 'No pudimos limpiar el caché.'),
+              res.ok ? 'exito' : 'error');
+          });
+        });
+
+        App.$('#cReset', cont).addEventListener('click', function () {
+          App.confirmar({
+            titulo: 'Reiniciar demo',
+            mensaje: 'Se borran todos los pedidos, líneas, pagos y avisos, y se vuelven a cargar los 8 pedidos de ejemplo. ' +
+              'Los clientes y los servicios se conservan. Esta acción no se puede deshacer.',
+            confirmar: 'Borrar y reiniciar',
+            peligro: true
+          }).then(function (ok) {
+            if (!ok) return;
+            App.cargando(1, 'Reiniciando demo…');
+            App.api('reiniciarDemoAdmin', App.sesion.token).then(function (res) {
+              App.cargando(-1);
+              if (!res.ok) {
+                App.toast(res.error || 'No pudimos reiniciar la demo.', 'error');
+                return;
+              }
+              App.toast(res.mensaje + ' (' + (res.ordenesCreadas || 0) + ' pedidos)', 'exito');
+            });
+          });
+        });
+      }
+
+      function pintar(cfg, servicios) {
+        s.config = cfg;
+        s.servicios = servicios || [];
+
+        cont.innerHTML = template(cfg);
+        pintarServicios();
+        bind();
+      }
+
+      App.cargando(1, 'Cargando configuración…');
+      App.api('getConfigAdmin', App.sesion.token).then(function (res) {
+        App.cargando(-1);
+        if (!res.ok) {
+          cont.innerHTML = '<div class="vacio-bloque"><strong>No pudimos cargar la configuración.</strong>' +
+            App.esc(res.error || '') + '</div>';
+          return;
+        }
+        pintar(res.config, res.servicios);
+      });
+
+      return function limpiar() { /* sin listeners globales */ };
+    }
+
+    V.configuracion = { montar: montar };
+  })();
+</script>

@@ -1,0 +1,711 @@
+<style>
+  .sugerencias {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    z-index: 30;
+    background: #fff;
+    border: 1px solid var(--color-borde);
+    border-radius: 12px;
+    box-shadow: 0 14px 34px rgba(15, 60, 70, .16);
+    overflow: hidden;
+    max-height: 260px;
+    overflow-y: auto;
+  }
+  .sugerencias button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: 0;
+    border-bottom: 1px solid #EEF2F3;
+    background: #fff;
+    padding: 10px 12px;
+    font: inherit;
+    cursor: pointer;
+  }
+  .sugerencias button:last-child { border-bottom: 0; }
+  .sugerencias button:hover, .sugerencias button:focus-visible { background: var(--fondo-tenue); outline: none; }
+  .sugerencias strong { display: block; font-size: 13.5px; }
+  .sugerencias small { color: var(--tinta-suave); font-size: 11.5px; }
+
+  .exito-orden { text-align: center; }
+  .exito-orden__icono {
+    width: 58px; height: 58px; border-radius: 50%;
+    background: #E2F3E8; color: #2E7D4F;
+    display: grid; place-items: center; margin: 2px auto 10px;
+  }
+  .exito-orden__icono svg { width: 28px; height: 28px; }
+  .exito-orden__codigo {
+    font-family: 'Fraunces', Georgia, serif;
+    font-size: 30px; font-weight: 700; color: var(--color-primario);
+  }
+  .exito-orden__texto { font-size: 14px; margin: 6px 0 14px; line-height: 1.5; }
+  .exito-orden__datos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+  .exito-orden__datos div { background: var(--fondo-tenue); border-radius: 10px; padding: 8px; }
+  .exito-orden__datos span {
+    display: block; font-size: 10px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--tinta-suave); font-weight: 700;
+  }
+  .exito-orden__datos strong { font-size: 12.5px; }
+  @media (max-width: 480px) { .exito-orden__datos { grid-template-columns: 1fr; } }
+</style>
+
+<script>
+  /* ==========================================================================
+     VISTA MOSTRADOR — recepción por kilo con especiales y total en vivo.
+     ========================================================================== */
+  (function () {
+    'use strict';
+
+    var V = window.Vistas = window.Vistas || {};
+
+    function sumarDiasISO(iso, dias) {
+      var p = iso.split('-');
+      var t = Date.UTC(Number(p[0]), Number(p[1]) - 1, Number(p[2])) + dias * 86400000;
+      return new Date(t).toISOString().slice(0, 10);
+    }
+
+    function diaSemanaISO(iso) {
+      var p = iso.split('-');
+      return new Date(Date.UTC(Number(p[0]), Number(p[1]) - 1, Number(p[2]))).getUTCDay();
+    }
+
+    function sumarHabiles(iso, dias, cerrados) {
+      var actual = iso;
+      var agregados = 0;
+      var vueltas = 0;
+      var total = Math.max(0, Number(dias) || 0);
+      while (agregados < total && vueltas < 90) {
+        actual = sumarDiasISO(actual, 1);
+        if (cerrados.indexOf(diaSemanaISO(actual)) === -1) agregados++;
+        vueltas++;
+      }
+      return actual;
+    }
+
+    function telefonoBonito(tel) {
+      var d = String(tel || '').replace(/\D/g, '');
+      if (d.indexOf('591') === 0 && d.length > 8) d = d.slice(3);
+      if (d.length === 8) return d.slice(0, 3) + ' ' + d.slice(3, 6) + ' ' + d.slice(6);
+      return d;
+    }
+
+    function montar(cont) {
+      var ctx = App.ctx;
+      var cfg = ctx.cfg || {};
+      var kgServices = (ctx.servicios || []).filter(function (s) { return s.tipo === 'kg'; });
+      var piezaServices = (ctx.servicios || []).filter(function (s) { return s.tipo === 'pieza'; });
+
+      if (!kgServices.length) {
+        cont.innerHTML = '<div class="vacio-bloque"><strong>No hay servicios por kilo activos.</strong>' +
+          'Pedile a administración que active uno en Configuración.</div>';
+        return;
+      }
+
+      var s = {
+        servicioId: kgServices[0].id,
+        nombre: '',
+        telefono: '',
+        peso: '',
+        prendas: 0,
+        especiales: {},
+        planchadoExtra: 0,
+        express: false,
+        descuento: '',
+        fechaManual: '',
+        observaciones: ''
+      };
+
+      var tarjetasServicio = kgServices.map(function (serv, i) {
+        return '<label class="servicio' + (i === 0 ? ' seleccionado' : '') + '" data-servicio="' + serv.id + '">' +
+          '<input type="radio" name="mServicio" value="' + serv.id + '"' + (i === 0 ? ' checked' : '') + '>' +
+          '<span class="servicio__radio" aria-hidden="true"></span>' +
+          '<span style="flex:1;min-width:0">' +
+            '<span class="servicio__nombre" style="display:block">' + App.esc(serv.nombre) + '</span>' +
+            '<span class="servicio__detalle" style="display:block">' +
+              App.esc(serv.descripcion || (serv.incluyePlanchado ? 'Incluye planchado' : 'Secado al aire')) +
+            '</span>' +
+          '</span>' +
+          '<span class="servicio__precio">' + App.bs(serv.precio) + '/kg</span>' +
+        '</label>';
+      }).join('');
+
+      var lineasEspeciales = piezaServices.map(function (serv) {
+        return '<div class="linea-especial" data-id="' + serv.id + '">' +
+          '<div class="linea-especial__nombre">' +
+            App.esc(serv.nombre) +
+            '<div class="linea-especial__precio">' + App.bs(serv.precio) + ' · por pieza</div>' +
+          '</div>' +
+          '<div class="stepper">' +
+            '<button type="button" data-paso="-1" data-id="' + serv.id + '" aria-label="Quitar ' + App.esc(serv.nombre) + '">−</button>' +
+            '<output data-out="' + serv.id + '">0</output>' +
+            '<button type="button" data-paso="1" data-id="' + serv.id + '" aria-label="Agregar ' + App.esc(serv.nombre) + '">+</button>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+
+      cont.innerHTML =
+        '<div class="vista__cabecera">' +
+          '<div>' +
+            '<h1 class="vista__titulo">Recepción</h1>' +
+            '<p class="vista__bajada">Pesá la ropa, sumá especiales y confirmá el pedido.</p>' +
+          '</div>' +
+          '<span class="chip-info">Hoy · ' + App.esc(App.fechaISO(ctx.hoy)) + '</span>' +
+        '</div>' +
+
+        '<div class="grilla grilla--mostrador">' +
+
+          '<div class="grilla" style="gap:14px">' +
+
+            '<section class="tarjeta">' +
+              '<h2 class="seccion-titulo"><span class="paso-num">1</span> Cliente</h2>' +
+              '<div class="grilla grilla--2" style="gap:0 14px">' +
+                '<div class="campo">' +
+                  '<label for="mNombre">Nombre</label>' +
+                  '<input id="mNombre" type="text" maxlength="60" autocomplete="off" placeholder="Nombre y apellido">' +
+                '</div>' +
+                '<div class="campo">' +
+                  '<label for="mTelefono">Celular</label>' +
+                  '<div style="position:relative">' +
+                    '<input id="mTelefono" type="tel" inputmode="numeric" maxlength="15" autocomplete="off" placeholder="712 345 67">' +
+                    '<div id="mSugerencias" class="sugerencias oculto" role="listbox" aria-label="Clientes conocidos"></div>' +
+                  '</div>' +
+                '</div>' +
+              '</div>' +
+              '<p class="ayuda" style="margin:-4px 0 0">8 dígitos, empieza en 6 o 7. Si ya vino antes, sus datos aparecen al escribir.</p>' +
+            '</section>' +
+
+            '<section class="tarjeta">' +
+              '<h2 class="seccion-titulo"><span class="paso-num">2</span> Peso y servicio</h2>' +
+              '<div class="peso-caja">' +
+                '<input id="mPeso" type="text" inputmode="decimal" autocomplete="off" placeholder="0,0" aria-label="Peso de la ropa en kilos">' +
+                '<span class="peso-caja__unidad">kg</span>' +
+                '<span class="peso-caja__min" id="mMinimo">' +
+                  (Number(cfg.minimoKg) > 0 ? 'mín. ' + App.kg(cfg.minimoKg) : 'sin mínimo') +
+                '</span>' +
+              '</div>' +
+              '<div class="campo" style="margin:14px 0 0;max-width:260px">' +
+                '<label for="mPrendas">Cantidad de prendas</label>' +
+                '<div style="display:flex;align-items:center;gap:10px">' +
+                  '<input id="mPrendas" type="number" inputmode="numeric" min="0" max="500" step="1" value="0" style="width:110px">' +
+                  '<div class="stepper">' +
+                    '<button type="button" id="mPrendasMenos" aria-label="Restar prenda">−</button>' +
+                    '<button type="button" id="mPrendasMas" aria-label="Sumar prenda">+</button>' +
+                  '</div>' +
+                '</div>' +
+              '</div>' +
+              '<div class="campo" style="margin:16px 0 8px">' +
+                '<label>Servicio base (se cobra por kilo)</label>' +
+              '</div>' +
+              '<div class="servicios" id="mServicios">' + tarjetasServicio + '</div>' +
+            '</section>' +
+
+            '<section class="tarjeta" id="mEspecialesSeccion">' +
+              '<h2 class="seccion-titulo"><span class="paso-num">3</span> Especiales</h2>' +
+              '<p class="ayuda" style="margin:-8px 0 8px">Edredones, quilts, alfombras y cortinas se cobran por pieza.</p>' +
+              '<div id="mEspeciales">' +
+                (lineasEspeciales || '<p class="ayuda">No hay artículos especiales cargados.</p>') +
+              '</div>' +
+            '</section>' +
+
+            '<section class="tarjeta">' +
+              '<h2 class="seccion-titulo"><span class="paso-num">4</span> Extras</h2>' +
+              '<div class="grilla grilla--2" style="gap:12px">' +
+                '<label class="interruptor">' +
+                  '<input type="checkbox" id="mExpress">' +
+                  '<span class="interruptor__pista" aria-hidden="true"></span>' +
+                  '<span class="interruptor__texto">' +
+                    '<strong>Express · +' + App.bs(cfg.recargoExpress || 0) + '</strong>' +
+                    '<span>Listo en ' + (Number(cfg.diasEntregaExpress) === 1 ? '1 día' : cfg.diasEntregaExpress + ' días') + '</span>' +
+                  '</span>' +
+                '</label>' +
+                '<div class="campo" style="margin-bottom:0">' +
+                  '<label for="mPlanchadoExtra">Planchado extra</label>' +
+                  '<div style="display:flex;align-items:center;gap:10px">' +
+                    '<input id="mPlanchadoExtra" type="number" inputmode="numeric" min="0" max="100" step="1" value="0" style="width:100px">' +
+                    '<span class="ayuda">prendas · ' + App.bs(cfg.precioPlanchadoPieza || 0) + ' c/u</span>' +
+                  '</div>' +
+                '</div>' +
+              '</div>' +
+              '<div class="campo" style="margin:14px 0 0;max-width:240px">' +
+                '<label for="mDescuento">Descuento</label>' +
+                '<input id="mDescuento" type="text" inputmode="decimal" autocomplete="off" placeholder="0,00">' +
+              '</div>' +
+            '</section>' +
+
+            '<section class="tarjeta">' +
+              '<h2 class="seccion-titulo"><span class="paso-num">5</span> Entrega</h2>' +
+              '<div class="grilla grilla--2" style="gap:14px">' +
+                '<div class="campo" style="margin-bottom:0">' +
+                  '<label for="mFecha">Fecha prometida</label>' +
+                  '<input id="mFecha" type="date" min="' + App.esc(ctx.hoy) + '">' +
+                  '<p class="ayuda" id="mFechaAuto" style="margin:6px 0 0"></p>' +
+                '</div>' +
+                '<div class="campo" style="margin-bottom:0">' +
+                  '<label for="mObservaciones">Observaciones</label>' +
+                  '<textarea id="mObservaciones" rows="2" maxlength="300" placeholder="Manchas, instrucciones, horario de retiro…"></textarea>' +
+                '</div>' +
+              '</div>' +
+            '</section>' +
+
+          '</div>' +
+
+          '<aside class="resumen-flotante">' +
+            '<div class="tarjeta">' +
+              '<h2 class="seccion-titulo">Resumen</h2>' +
+              '<div id="mResumenCliente" class="ayuda" style="margin:-6px 0 10px"></div>' +
+              '<div id="mResumenLineas"></div>' +
+              '<div class="totales-linea totales-linea--tenue"><span>Subtotal</span><span id="mSubtotal">—</span></div>' +
+              '<div class="totales-linea totales-linea--descuento oculto" id="mDescuentoLinea"><span>Descuento</span><span></span></div>' +
+              '<div class="resumen-total">' +
+                '<span class="resumen-total__label">Total</span>' +
+                '<span class="resumen-total__valor" id="mTotal">' + App.bs(0) + '</span>' +
+              '</div>' +
+              '<div id="mMinimoAviso" style="margin-bottom:10px"></div>' +
+              '<button type="button" class="btn btn-primario btn-bloque" id="mBtnRegistrar">Registrar orden</button>' +
+              '<p class="ayuda" style="margin:10px 0 0">Al guardar podés imprimir el recibo y copiar el link de estado del pedido.</p>' +
+            '</div>' +
+          '</aside>' +
+
+        '</div>';
+
+      var el = {
+        nombre: App.$('#mNombre', cont),
+        telefono: App.$('#mTelefono', cont),
+        sugerencias: App.$('#mSugerencias', cont),
+        peso: App.$('#mPeso', cont),
+        prendas: App.$('#mPrendas', cont),
+        servicios: App.$('#mServicios', cont),
+        especiales: App.$('#mEspeciales', cont),
+        planchado: App.$('#mPlanchadoExtra', cont),
+        express: App.$('#mExpress', cont),
+        descuento: App.$('#mDescuento', cont),
+        fecha: App.$('#mFecha', cont),
+        fechaAuto: App.$('#mFechaAuto', cont),
+        observaciones: App.$('#mObservaciones', cont),
+        resumenCliente: App.$('#mResumenCliente', cont),
+        resumenLineas: App.$('#mResumenLineas', cont),
+        subtotal: App.$('#mSubtotal', cont),
+        descuentoLinea: App.$('#mDescuentoLinea', cont),
+        total: App.$('#mTotal', cont),
+        minimoAviso: App.$('#mMinimoAviso', cont),
+        btnRegistrar: App.$('#mBtnRegistrar', cont)
+      };
+
+      function servicioSeleccionado() {
+        return kgServices.filter(function (x) { return x.id === s.servicioId; })[0] || kgServices[0];
+      }
+
+      function piezaPorId(id) {
+        var n = Number(id);
+        return piezaServices.filter(function (x) { return x.id === n; })[0] || null;
+      }
+
+      function pesoNum() {
+        var n = Number(String(s.peso || '').replace(',', '.'));
+        return isFinite(n) && n > 0 ? n : 0;
+      }
+
+      function descuentoNum() {
+        var n = Number(String(s.descuento || '').replace(',', '.'));
+        return isFinite(n) && n > 0 ? n : 0;
+      }
+
+      function incluyePlanchado() {
+        var serv = servicioSeleccionado();
+        return !!serv.incluyePlanchado || s.planchadoExtra > 0;
+      }
+
+      function calcular() {
+        var serv = servicioSeleccionado();
+        var peso = pesoNum();
+        var minimo = Number(cfg.minimoKg) || 0;
+        var pesoCobrado = Math.max(peso, minimo);
+        var lineas = [];
+
+        if (peso > 0) {
+          lineas.push({
+            label: serv.nombre + ' · ' + App.kg(peso) +
+              (pesoCobrado > peso + 0.0001 ? ' (mínimo ' + App.kg(minimo) + ')' : ''),
+            monto: pesoCobrado * serv.precio
+          });
+        }
+
+        Object.keys(s.especiales).forEach(function (id) {
+          var cantidad = s.especiales[id];
+          var pieza = piezaPorId(id);
+          if (!cantidad || !pieza) return;
+          lineas.push({ label: pieza.nombre + ' × ' + cantidad, monto: cantidad * pieza.precio });
+        });
+
+        if (s.planchadoExtra > 0) {
+          lineas.push({
+            label: 'Planchado extra × ' + s.planchadoExtra,
+            monto: s.planchadoExtra * (Number(cfg.precioPlanchadoPieza) || 0)
+          });
+        }
+
+        if (s.express && Number(cfg.recargoExpress) > 0) {
+          lineas.push({ label: 'Servicio express', monto: Number(cfg.recargoExpress) });
+        }
+
+        var subtotal = lineas.reduce(function (suma, l) { return suma + l.monto; }, 0);
+        var descuento = Math.min(descuentoNum(), subtotal);
+        return {
+          servicio: serv,
+          peso: peso,
+          minimo: minimo,
+          pesoCobrado: pesoCobrado,
+          lineas: lineas,
+          subtotal: subtotal,
+          descuento: descuento,
+          total: subtotal - descuento
+        };
+      }
+
+      function fechaAutomatica() {
+        var dias = s.express
+          ? Number(cfg.diasEntregaExpress) || 0
+          : (incluyePlanchado() ? Number(cfg.diasEntregaPlanchado) || 0 : Number(cfg.diasEntregaLavado) || 0);
+        return sumarHabiles(ctx.hoy, dias, cfg.diasCerrados || []);
+      }
+
+      function renderFecha() {
+        var auto = fechaAutomatica();
+        if (s.fechaManual) {
+          el.fechaAuto.innerHTML = 'Manual: <strong>' + App.esc(App.fechaISO(s.fechaManual)) +
+            '</strong> · <button type="button" class="btn-texto btn-xs" id="mFechaReset" style="padding:0!important">usar automática</button>';
+          var reset = App.$('#mFechaReset', el.fechaAuto);
+          if (reset) {
+            reset.addEventListener('click', function () {
+              s.fechaManual = '';
+              el.fecha.value = '';
+              renderFecha();
+            });
+          }
+        } else {
+          el.fechaAuto.innerHTML = 'Automática: <strong>' + App.esc(App.fechaISO(auto)) + '</strong>';
+        }
+      }
+
+      function renderResumen() {
+        var c = calcular();
+        var lineasHtml = c.lineas.map(function (l) {
+          return '<div class="totales-linea"><span>' + App.esc(l.label) + '</span><span>' + App.bs(l.monto) + '</span></div>';
+        }).join('');
+
+        el.resumenLineas.innerHTML = lineasHtml || '<p class="ayuda" style="margin:0 0 6px">Cargá el peso para ver el total.</p>';
+        el.subtotal.textContent = c.lineas.length ? App.bs(c.subtotal) : '—';
+        el.total.textContent = App.bs(c.total);
+
+        if (c.descuento > 0) {
+          el.descuentoLinea.classList.remove('oculto');
+          el.descuentoLinea.lastElementChild.textContent = '− ' + App.bs(c.descuento);
+        } else {
+          el.descuentoLinea.classList.add('oculto');
+        }
+
+        var nombre = s.nombre.trim();
+        var tel = telefonoBonito(s.telefono);
+        el.resumenCliente.innerHTML = nombre
+          ? '<strong style="color:var(--color-texto)">' + App.esc(nombre) + '</strong>' + (tel ? ' · ' + App.esc(tel) : '')
+          : 'Sin cliente todavía';
+
+        if (c.peso > 0 && c.peso < c.minimo) {
+          el.minimoAviso.innerHTML = '<span class="chip-info chip-info--alerta">Se cobra el mínimo de ' + App.kg(c.minimo) + '</span>';
+        } else {
+          el.minimoAviso.innerHTML = '';
+        }
+
+        renderFecha();
+      }
+
+      // ------------------------- Sugerencias de clientes ---------------------
+      var busquedaTimer = null;
+      var busquedaSeq = 0;
+
+      function ocultarSugerencias() {
+        if (!el.sugerencias) return;
+        el.sugerencias.classList.add('oculto');
+        el.sugerencias.innerHTML = '';
+      }
+
+      function pintarSugerencias(clientes) {
+        if (!clientes || !clientes.length) {
+          ocultarSugerencias();
+          return;
+        }
+        el.sugerencias.innerHTML = clientes.map(function (c, i) {
+          return '<button type="button" data-indice="' + i + '" role="option">' +
+            '<strong>' + App.esc(c.nombre) + '</strong>' +
+            '<small>' + App.esc(c.telefonoBonito || c.telefono) + '</small>' +
+          '</button>';
+        }).join('');
+        el.sugerencias.classList.remove('oculto');
+
+        App.$$('[data-indice]', el.sugerencias).forEach(function (boton) {
+          boton.addEventListener('click', function () {
+            var c = clientes[Number(boton.getAttribute('data-indice'))];
+            if (!c) return;
+            s.nombre = c.nombre;
+            s.telefono = c.telefono;
+            el.nombre.value = c.nombre;
+            el.telefono.value = c.telefonoBonito || c.telefono;
+            ocultarSugerencias();
+            renderResumen();
+            el.peso.focus();
+          });
+        });
+      }
+
+      function programarBusqueda() {
+        window.clearTimeout(busquedaTimer);
+        var digitos = String(s.telefono || '').replace(/\D/g, '');
+        var texto = digitos.length >= 3 ? s.telefono : s.nombre;
+        if (String(texto || '').trim().length < 2) {
+          ocultarSugerencias();
+          return;
+        }
+        busquedaTimer = window.setTimeout(function () {
+          var seq = ++busquedaSeq;
+          App.api('buscarClientes', App.sesion.token, texto).then(function (res) {
+            if (seq !== busquedaSeq) return;
+            if (!res || !res.ok) return;
+            pintarSugerencias(res.clientes);
+          });
+        }, 300);
+      }
+
+      function fueraClick(ev) {
+        if (!el.sugerencias) return;
+        if (el.sugerencias.contains(ev.target)) return;
+        if (ev.target === el.telefono || ev.target === el.nombre) return;
+        ocultarSugerencias();
+      }
+
+      document.addEventListener('mousedown', fueraClick);
+
+      // ------------------------------ Eventos -------------------------------
+      el.nombre.addEventListener('input', function () {
+        s.nombre = el.nombre.value;
+        renderResumen();
+        programarBusqueda();
+      });
+
+      el.telefono.addEventListener('input', function () {
+        var limpio = el.telefono.value.replace(/[^\d+\s-]/g, '');
+        if (limpio !== el.telefono.value) el.telefono.value = limpio;
+        s.telefono = limpio;
+        renderResumen();
+        programarBusqueda();
+      });
+
+      el.telefono.addEventListener('focus', programarBusqueda);
+
+      el.peso.addEventListener('input', function () {
+        var limpio = el.peso.value.replace(/[^\d.,]/g, '');
+        if (limpio !== el.peso.value) el.peso.value = limpio;
+        s.peso = limpio;
+        renderResumen();
+      });
+
+      function setPrendas(valor) {
+        var n = Math.max(0, Math.min(500, Math.floor(Number(valor) || 0)));
+        s.prendas = n;
+        el.prendas.value = String(n);
+      }
+
+      el.prendas.addEventListener('input', function () { setPrendas(el.prendas.value); });
+      App.$('#mPrendasMenos', cont).addEventListener('click', function () { setPrendas(s.prendas - 1); });
+      App.$('#mPrendasMas', cont).addEventListener('click', function () { setPrendas(s.prendas + 1); });
+
+      el.servicios.addEventListener('click', function (ev) {
+        var tarjeta = ev.target.closest('.servicio');
+        if (!tarjeta) return;
+        s.servicioId = Number(tarjeta.getAttribute('data-servicio'));
+        App.$$('.servicio', el.servicios).forEach(function (c) {
+          c.classList.toggle('seleccionado', c === tarjeta);
+        });
+        var radio = App.$('input', tarjeta);
+        if (radio) radio.checked = true;
+        renderResumen();
+      });
+
+      el.especiales.addEventListener('click', function (ev) {
+        var boton = ev.target.closest('[data-paso]');
+        if (!boton) return;
+        var id = Number(boton.getAttribute('data-id'));
+        var delta = Number(boton.getAttribute('data-paso'));
+        var actual = s.especiales[id] || 0;
+        var nuevo = Math.max(0, Math.min(50, actual + delta));
+        if (nuevo === 0) delete s.especiales[id];
+        else s.especiales[id] = nuevo;
+        var salida = App.$('output[data-out="' + id + '"]', el.especiales);
+        if (salida) salida.textContent = String(nuevo);
+        renderResumen();
+      });
+
+      el.planchado.addEventListener('input', function () {
+        var n = Math.max(0, Math.min(100, Math.floor(Number(el.planchado.value) || 0)));
+        s.planchadoExtra = n;
+        renderResumen();
+      });
+
+      el.express.addEventListener('change', function () {
+        s.express = !!el.express.checked;
+        renderResumen();
+      });
+
+      el.descuento.addEventListener('input', function () {
+        var limpio = el.descuento.value.replace(/[^\d.,]/g, '');
+        if (limpio !== el.descuento.value) el.descuento.value = limpio;
+        s.descuento = limpio;
+        renderResumen();
+      });
+
+      el.fecha.addEventListener('change', function () {
+        s.fechaManual = el.fecha.value || '';
+        renderResumen();
+      });
+
+      el.observaciones.addEventListener('input', function () {
+        s.observaciones = el.observaciones.value;
+      });
+
+      // ------------------------------- Reset --------------------------------
+      function reset() {
+        s.nombre = '';
+        s.telefono = '';
+        s.peso = '';
+        s.prendas = 0;
+        s.especiales = {};
+        s.planchadoExtra = 0;
+        s.express = false;
+        s.descuento = '';
+        s.fechaManual = '';
+        s.observaciones = '';
+
+        el.nombre.value = '';
+        el.telefono.value = '';
+        el.peso.value = '';
+        el.prendas.value = '0';
+        el.planchado.value = '0';
+        el.express.checked = false;
+        el.descuento.value = '';
+        el.fecha.value = '';
+        el.observaciones.value = '';
+        App.$$('output', el.especiales).forEach(function (o) { o.textContent = '0'; });
+        ocultarSugerencias();
+        renderResumen();
+      }
+
+      // ------------------------------ Registro ------------------------------
+      function validar() {
+        var faltas = [];
+        if (s.nombre.trim().length < 2) faltas.push('nombre del cliente');
+
+        var tel = String(s.telefono || '').replace(/\D/g, '');
+        if (tel.indexOf('00591') === 0) tel = tel.slice(5);
+        else if (tel.indexOf('591') === 0 && tel.length > 8) tel = tel.slice(3);
+        if (!/^[67]\d{7}$/.test(tel)) faltas.push('celular de 8 dígitos');
+
+        if (!(pesoNum() > 0)) faltas.push('peso en kilos');
+        return faltas;
+      }
+
+      function abrirExito(orden) {
+        var cuerpo =
+          '<div class="exito-orden">' +
+            '<div class="exito-orden__icono">' + App.icono('check') + '</div>' +
+            '<div class="exito-orden__codigo">' + App.esc(orden.codigo) + '</div>' +
+            '<p class="exito-orden__texto">Pedido de <strong>' + App.esc(orden.cliente.nombre) +
+              '</strong> por <strong>' + App.bs(orden.total) + '</strong>.</p>' +
+            '<div class="exito-orden__datos">' +
+              '<div><span>Entrega</span><strong>' + App.esc(App.fechaLargaISO(orden.fechaPrometida)) + '</strong></div>' +
+              '<div><span>Prendas</span><strong>' + (orden.prendas || '—') + '</strong></div>' +
+              '<div><span>Peso</span><strong>' + App.kg(orden.pesoKg) + '</strong></div>' +
+            '</div>' +
+            (Number(orden.saldo) > 0.005
+              ? '<div class="chip-info chip-info--alerta">Saldo a cobrar al retirar: ' + App.bs(orden.saldo) + '</div>'
+              : '<div class="chip-info">Pedido pago</div>') +
+          '</div>';
+
+        App.modal({
+          titulo: 'Orden registrada',
+          sub: 'Imprimí el recibo o compartí el link de estado.',
+          ancho: 'angosto',
+          cuerpo: cuerpo,
+          acciones: [
+            {
+              label: 'Copiar link de estado',
+              clase: 'btn-secundario',
+              cerrar: false,
+              onClick: function () {
+                App.copiar(orden.linkEstado).then(function (ok) {
+                  App.toast(ok ? 'Link copiado.' : 'No pudimos copiar el link.', ok ? 'exito' : 'error');
+                });
+              }
+            },
+            {
+              label: 'Imprimir recibo',
+              clase: 'btn-primario',
+              onClick: function () { App.imprimirRecibo(orden); }
+            }
+          ]
+        });
+      }
+
+      el.btnRegistrar.addEventListener('click', function () {
+        var faltas = validar();
+        if (faltas.length) {
+          App.toast('Revisá: ' + faltas.join(', ') + '.', 'error');
+          return;
+        }
+
+        var servicio = servicioSeleccionado();
+        var especiales = Object.keys(s.especiales).map(function (id) {
+          return { servicioId: Number(id), cantidad: s.especiales[id] };
+        });
+
+        var datos = {
+          nombre: s.nombre.trim(),
+          telefono: s.telefono,
+          servicioId: servicio.id,
+          pesoKg: String(pesoNum()).replace('.', ','),
+          prendas: s.prendas,
+          especiales: especiales,
+          planchadoExtra: s.planchadoExtra,
+          express: s.express,
+          descuento: descuentoNum(),
+          fechaPrometida: s.fechaManual || '',
+          observaciones: s.observaciones
+        };
+
+        el.btnRegistrar.disabled = true;
+        el.btnRegistrar.textContent = 'Registrando…';
+
+        App.api('crearOrden', App.sesion.token, datos).then(function (res) {
+          el.btnRegistrar.disabled = false;
+          el.btnRegistrar.textContent = 'Registrar orden';
+          if (!res || !res.ok) {
+            App.toast((res && res.error) || 'No pudimos registrar la orden.', 'error');
+            return;
+          }
+          App.toast('Orden ' + res.orden.codigo + ' registrada.', 'exito');
+          reset();
+          abrirExito(res.orden);
+        });
+      });
+
+      renderResumen();
+
+      return function limpiar() {
+        window.clearTimeout(busquedaTimer);
+        document.removeEventListener('mousedown', fueraClick);
+      };
+    }
+
+    V.mostrador = { montar: montar };
+  })();
+</script>

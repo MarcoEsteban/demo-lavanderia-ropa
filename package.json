@@ -11,6 +11,8 @@
     "logs": "clasp tail-logs --watch",
     "open": "clasp open-script",
     "deploy": "node scripts/deploy.mjs",
+    "demo": "node scripts/build-demo.mjs",
+    "demo:netlify": "OUT_DIR=dist BASE_URL=https://demo-lavanderia-ropa.netlify.app ADMIN_NAME=Admin.html ESTADO_NAME=Estado.html LANDING=1 node scripts/build-demo.mjs",
     "check": "node --check src/Codigo.js && node --check src/Operaciones.js",
     "test": "TZ=America/La_Paz node --test tests/*.test.mjs"
   },

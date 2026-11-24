@@ -113,7 +113,34 @@ var SESION_TTL_SEGUNDOS = 21600; // máximo permitido por CacheService: 6 h
 // WEB APP
 // ----------------------------------------------------------------------------
 
+/**
+ * Prepara la planilla la primera vez que alguien abre la Web App.
+ * Deja todo listo sin exigir ejecutar setup() a mano y siembra los pedidos
+ * de ejemplo en segundo plano para no demorar la primera carga.
+ * Es idempotente y está protegido con LockService.
+ */
+function bootstrapDemo_() {
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty('DEMO_LISTO') === 'ok') return;
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return;
+  try {
+    if (props.getProperty('DEMO_LISTO') === 'ok') return;
+    setup();
+    if (!hayOrdenes_()) {
+      ScriptApp.newTrigger('sembrarDemo').timeBased().after(60000).create();
+    }
+    props.setProperty('DEMO_LISTO', 'ok');
+  } catch (err) {
+    console.error('No se pudo preparar la demo: ' + err);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function doGet(e) {
+  bootstrapDemo_();
   var params = (e && e.parameter) || {};
   var cfg = getConfig_();
   var tema = {

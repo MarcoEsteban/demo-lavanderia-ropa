@@ -11,6 +11,15 @@ cliente como canal de consulta.
 
 ---
 
+## Demo online
+
+- **Panel + estado público (datos simulados)**: <https://demo-lavanderia-ropa.netlify.app>
+  Se puede recorrer todo sin cuenta. Los datos viven en el navegador y se reinician al recargar.
+- **Versión real**: se despliega sobre tu propia hoja de Google con Apps Script
+  (ver *Puesta en marcha*).
+
+---
+
 ## Capturas
 
 ### Panel del local
@@ -93,21 +102,18 @@ de Apps Script respetando los nombres de `src/` y pegá el manifiesto en
 
 ### 3. Preparar la hoja
 
-En el editor de Apps Script, ejecutá una vez:
+La Web App se inicializa sola en la primera visita autorizada: `bootstrapDemo_()`
+crea las 8 hojas con sus encabezados, la configuración por defecto, el catálogo de
+servicios y los PINs demo, y programa la carga de los 8 pedidos de ejemplo.
+
+Si preferís preparar la hoja antes, ejecutá una vez en el editor:
 
 ```text
-setup()
+sembrarDemo()
 ```
 
-Autorizá los permisos cuando lo pida. Esto:
-
-- crea las 8 hojas con sus encabezados;
-- carga la configuración por defecto;
-- carga el catálogo de servicios de ejemplo;
-- crea los PINs de demo en las propiedades del script.
-
-Después, desde la planilla, usá el menú **Lavandería Demo → 2. Cargar datos de ejemplo**
-(o el botón equivalente en *Configuración*) para tener 8 pedidos en distintos estados.
+Autorizá los permisos cuando lo pida. `setup()` también existe y hace lo mismo,
+pero sin cargar pedidos de ejemplo.
 
 ### 4. Publicar la Web App
 
@@ -117,6 +123,9 @@ En Apps Script: **Implementar → Nueva implementación → Aplicación web**.
 - **Quién tiene acceso**: cualquier persona (`ANYONE_ANONYMOUS`).
 
 La página pública de estado necesita acceso anónimo. El panel pide PIN igual.
+
+La **primera visita** debe hacerla la cuenta dueña del script para autorizar los
+permisos de Sheets y Drive. Después la URL queda pública para cualquiera.
 
 La URL queda así:
 
@@ -305,6 +314,13 @@ npm test        # 20 pruebas de backend con mocks de Apps Script
 Las pruebas corren con el runner nativo de Node y `TZ=America/La_Paz`.
 No necesitan credenciales ni conexión a Google.
 
+### Demo estático (Netlify)
+
+`npm run demo` genera una copia navegable en `.preview/` con datos simulados.
+`npm run demo:netlify` genera `dist/`, lista para `netlify deploy --dir dist --prod`.
+El backend real no corre en Netlify: `google.script.run` se reemplaza por
+`scripts/demo-mock.js` y los datos viven en memoria.
+
 ### QA aplicado
 
 - Backend: 20 pruebas sobre precios, mínimos, estados, planchado condicional,
@@ -334,6 +350,9 @@ No necesitan credenciales ni conexión a Google.
 | `src/Estado.html` | Página pública de estado |
 | `tests/backend.test.mjs` | Pruebas de backend con VM y mocks |
 | `scripts/deploy.mjs` | Push + deploy conservando la URL |
+| `scripts/build-demo.mjs` | Build del demo estático para Netlify |
+| `scripts/demo-mock.js` | Mock de `google.script.run` para el demo estático |
+| `netlify.toml` | Build y publish del demo en Netlify |
 | `assets/` | Capturas del panel y del estado público para el README |
 
 ---

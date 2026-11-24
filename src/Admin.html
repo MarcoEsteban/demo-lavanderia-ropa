@@ -150,6 +150,14 @@
   <div id="modalZona"></div>
   <div id="recibo-impresion"></div>
 
+  <script>
+    window.BOOT = <?!= jsonSeguro_({
+      negocio: datosNegocio_(cfg),
+      authConfigurada: getAuthConfigurada_(),
+      scriptUrl: scriptUrl
+    }) ?>;
+  </script>
+
   <?!= include('AppCore') ?>
   <?!= include('Componentes') ?>
   <?!= include('VistaMostrador') ?>
@@ -159,11 +167,6 @@
   <?!= include('VistaConfiguracion') ?>
 
   <script>
-    window.BOOT = <?!= jsonSeguro_({
-      negocio: datosNegocio_(cfg),
-      authConfigurada: getAuthConfigurada_(),
-      scriptUrl: scriptUrl
-    }) ?>;
     App.iniciar();
   </script>
 </body>

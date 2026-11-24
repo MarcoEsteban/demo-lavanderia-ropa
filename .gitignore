@@ -12,3 +12,7 @@ node_modules/
 
 # Preview local de QA (no se sube a Apps Script ni al repo)
 .preview/
+dist/
+
+# Local Netlify folder
+.netlify

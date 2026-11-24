@@ -1,0 +1,11 @@
+[build]
+  command = "node scripts/build-demo.mjs"
+  publish = "dist"
+
+[build.environment]
+  OUT_DIR = "dist"
+  BASE_URL = "https://demo-lavanderia-ropa.netlify.app"
+  ADMIN_NAME = "Admin.html"
+  ESTADO_NAME = "Estado.html"
+  LANDING = "1"
+  NPM_FLAGS = "--omit=dev"
